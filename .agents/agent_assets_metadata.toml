@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "jy7bw6GRrr7uJHvsBrS2A"
+uri = "file://artifacts/english-learning/assets/images/icon.png"
+type = "image"
+title = "english learning owl icon"
