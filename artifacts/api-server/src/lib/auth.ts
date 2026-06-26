@@ -5,7 +5,7 @@ const JWT_SECRET = process.env["SESSION_SECRET"] || "dev-secret-key";
 
 export interface AuthPayload {
   userId: number;
-  role: "student" | "parent" | "admin";
+  role: "student" | "parent" | "admin" | "teacher";
 }
 
 export function generateToken(payload: AuthPayload): string {
@@ -47,4 +47,8 @@ export function requireRole(...roles: string[]) {
 
 export function getUser(req: Request): AuthPayload {
   return (req as any).user as AuthPayload;
+}
+
+export function isTeacher(role: string): boolean {
+  return role === "admin" || role === "teacher";
 }

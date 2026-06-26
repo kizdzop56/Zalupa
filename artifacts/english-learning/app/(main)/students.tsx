@@ -7,7 +7,7 @@ import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAuth, isTeacherOrAdmin, LEVEL_META } from "@/contexts/AuthContext";
 import { useListUsers, useGetParentChildren } from "@workspace/api-client-react";
 import type { User, UserWithStats } from "@workspace/api-client-react";
 
@@ -18,6 +18,7 @@ export default function StudentsScreen() {
   const insets = useSafeAreaInsets();
 
   const isParent = user?.role === "parent";
+  const isTeacher = isTeacherOrAdmin(user?.role ?? "");
 
   const { data: allStudents, isLoading: loadingAll } = useListUsers(
     { role: "student" },
@@ -28,7 +29,7 @@ export default function StudentsScreen() {
     { query: { enabled: isParent && !!user?.id } as any }
   );
 
-  const students = (isParent ? children : allStudents) || [];
+  const students = (isParent ? children : allStudents) ?? [];
   const isLoading = isParent ? loadingChildren : loadingAll;
 
   const styles = StyleSheet.create({
@@ -46,75 +47,101 @@ export default function StudentsScreen() {
       flexDirection: "row", alignItems: "center", gap: 14,
     },
     avatar: {
-      width: 48, height: 48, borderRadius: 24,
+      width: 50, height: 50, borderRadius: 25,
       backgroundColor: colors.secondary, justifyContent: "center", alignItems: "center",
     },
     info: { flex: 1 },
     name: { fontSize: 15, fontWeight: "700", color: colors.foreground },
     username: { fontSize: 13, color: colors.mutedForeground },
-    meta: { flexDirection: "row", gap: 10, marginTop: 4 },
-    metaBadge: {
+    metaRow: { flexDirection: "row", gap: 8, marginTop: 5, flexWrap: "wrap" },
+    chip: {
       flexDirection: "row", alignItems: "center", gap: 3,
+      paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8,
     },
-    metaText: { fontSize: 12, color: colors.mutedForeground },
+    chipText: { fontSize: 11, fontWeight: "700" },
     statsCol: { alignItems: "flex-end", gap: 2 },
     points: { fontSize: 16, fontWeight: "800", color: colors.foreground },
     pointsLabel: { fontSize: 11, color: colors.mutedForeground },
     empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
-    emptyText: { fontSize: 16, color: colors.mutedForeground },
+    emptyText: { fontSize: 16, color: colors.mutedForeground, textAlign: "center" },
   });
 
-  const renderItem = ({ item }: { item: User | UserWithStats }) => (
-    <TouchableOpacity style={styles.card} onPress={() => router.push(`/(main)/student/${item.id}` as any)} activeOpacity={0.7}>
-      <View style={styles.avatar}>
-        <Feather name="user" size={22} color={colors.primary} />
-      </View>
-      <View style={styles.info}>
-        <Text style={styles.name}>{item.name}</Text>
-        <Text style={styles.username}>@{item.username}</Text>
-        <View style={styles.meta}>
-          {item.age && (
-            <View style={styles.metaBadge}>
-              <Feather name="calendar" size={11} color={colors.mutedForeground} />
-              <Text style={styles.metaText}>Age {item.age}</Text>
-            </View>
-          )}
-          {"completedAssignments" in item && (
-            <View style={styles.metaBadge}>
-              <Feather name="check-circle" size={11} color={colors.success} />
-              <Text style={styles.metaText}>{(item as UserWithStats).completedAssignments} done</Text>
-            </View>
-          )}
+  const renderItem = ({ item }: { item: User | UserWithStats }) => {
+    const knowledgeLevel = (item as any).knowledgeLevel as string | null;
+    const lvl = knowledgeLevel ? LEVEL_META[knowledgeLevel as keyof typeof LEVEL_META] : null;
+
+    return (
+      <TouchableOpacity
+        style={styles.card}
+        onPress={() => router.push(`/(main)/student/${item.id}` as any)}
+        activeOpacity={0.75}
+      >
+        <View style={[styles.avatar, lvl ? { backgroundColor: lvl.color + "20" } : {}]}>
+          <Feather name="user" size={22} color={lvl ? lvl.color : colors.primary} />
         </View>
-      </View>
-      <View style={styles.statsCol}>
-        <Text style={styles.points}>{item.totalPoints}</Text>
-        <Text style={styles.pointsLabel}>pts</Text>
-        <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
-      </View>
-    </TouchableOpacity>
-  );
+        <View style={styles.info}>
+          <Text style={styles.name}>{item.name}</Text>
+          <Text style={styles.username}>@{item.username}</Text>
+          <View style={styles.metaRow}>
+            {item.age != null && (
+              <View style={[styles.chip, { backgroundColor: colors.muted }]}>
+                <Feather name="calendar" size={10} color={colors.mutedForeground} />
+                <Text style={[styles.chipText, { color: colors.mutedForeground }]}>{item.age} лет</Text>
+              </View>
+            )}
+            {lvl && (
+              <View style={[styles.chip, { backgroundColor: lvl.color + "18" }]}>
+                <Feather name="zap" size={10} color={lvl.color} />
+                <Text style={[styles.chipText, { color: lvl.color }]}>{lvl.labelRu}</Text>
+              </View>
+            )}
+            {"completedAssignments" in item && (
+              <View style={[styles.chip, { backgroundColor: colors.muted }]}>
+                <Feather name="check-circle" size={10} color={colors.success} />
+                <Text style={[styles.chipText, { color: colors.mutedForeground }]}>
+                  {(item as UserWithStats).completedAssignments} выполнено
+                </Text>
+              </View>
+            )}
+          </View>
+        </View>
+        <View style={styles.statsCol}>
+          <Text style={styles.points}>{item.totalPoints}</Text>
+          <Text style={styles.pointsLabel}>очков</Text>
+          <Feather name="chevron-right" size={16} color={colors.mutedForeground} style={{ marginTop: 4 }} />
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>{isParent ? "My Children" : "All Students"}</Text>
+        <Text style={styles.title}>
+          {isParent ? "Мои дети" : "Ученики"}
+        </Text>
         <Text style={styles.subtitle}>
-          {isParent ? "Track your child's progress" : `${students.length} student${students.length !== 1 ? "s" : ""} enrolled`}
+          {isParent
+            ? "Прогресс вашего ребёнка"
+            : `${students.length} ${students.length === 1 ? "ученик" : "учеников"}`}
         </Text>
       </View>
 
       {isLoading ? (
-        <View style={styles.empty}><ActivityIndicator color={colors.primary} size="large" /></View>
+        <View style={styles.empty}>
+          <ActivityIndicator color={colors.primary} size="large" />
+        </View>
       ) : students.length === 0 ? (
         <View style={styles.empty}>
           <Feather name="users" size={48} color={colors.mutedForeground} />
-          <Text style={styles.emptyText}>{isParent ? "No children linked yet" : "No students yet"}</Text>
+          <Text style={styles.emptyText}>
+            {isParent ? "Дети ещё не привязаны" : "Учеников пока нет"}
+          </Text>
         </View>
       ) : (
         <FlatList
           data={students}
-          keyExtractor={s => String(s.id)}
+          keyExtractor={(s) => String(s.id)}
           renderItem={renderItem}
           contentContainerStyle={styles.list}
         />
