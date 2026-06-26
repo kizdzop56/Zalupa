@@ -119,6 +119,7 @@ export default function MainLayout() {
         <Tabs.Screen name="student/[id]" options={{ href: null }} />
         <Tabs.Screen name="assignment/[id]" options={{ href: null }} />
         <Tabs.Screen name="create-assignment" options={{ href: null }} />
+        <Tabs.Screen name="friend/[id]" options={{ href: null }} />
       </Tabs>
     </>
   );

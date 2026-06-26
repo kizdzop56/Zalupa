@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import {
-  View, Text, StyleSheet, TouchableOpacity, FlatList,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView,
   ActivityIndicator, Modal, TextInput, Platform, Alert,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
@@ -267,6 +267,12 @@ function AddByCodeModal({
   );
 }
 
+type PendingRequest = {
+  requestId: number;
+  student: PersonItem;
+  status: "pending";
+};
+
 export default function StudentsScreen() {
   const colors = useColors();
   const { user } = useAuth();
@@ -276,6 +282,7 @@ export default function StudentsScreen() {
   const isParent = user?.role === "parent";
 
   const [items, setItems] = useState<PersonItem[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
 
@@ -292,10 +299,16 @@ export default function StudentsScreen() {
 
   const load = React.useCallback(async () => {
     setLoading(true);
-    try { setItems(await apiFetch(listEndpoint)); }
-    catch { /* ignore */ }
+    try {
+      const [accepted, pending] = await Promise.all([
+        apiFetch(listEndpoint),
+        isTeacher ? apiFetch("/api/connections/teacher/pending") : Promise.resolve([]),
+      ]);
+      setItems(accepted);
+      setPendingRequests(pending);
+    } catch { /* ignore */ }
     finally { setLoading(false); }
-  }, [listEndpoint]);
+  }, [listEndpoint, isTeacher]);
 
   React.useEffect(() => { load(); }, [load]);
 
@@ -303,6 +316,15 @@ export default function StudentsScreen() {
     try {
       await apiFetch(deleteEndpoint(item.id), { method: "DELETE" });
       setItems((prev) => prev.filter((i) => i.id !== item.id));
+    } catch (e: any) {
+      Alert.alert("Ошибка", e.message);
+    }
+  };
+
+  const handleCancelRequest = async (req: PendingRequest) => {
+    try {
+      await apiFetch(`/api/connections/teacher/students/${req.student.id}`, { method: "DELETE" });
+      setPendingRequests((prev) => prev.filter((r) => r.requestId !== req.requestId));
     } catch (e: any) {
       Alert.alert("Ошибка", e.message);
     }
@@ -359,31 +381,85 @@ export default function StudentsScreen() {
 
       {loading ? (
         <View style={s.empty}><ActivityIndicator color={colors.primary} size="large" /></View>
-      ) : items.length === 0 ? (
-        <View style={s.content}>
-          <View style={s.empty}>
-            <Text style={s.emptyEmoji}>{isTeacher ? "🎓" : "👨‍👩‍👧"}</Text>
-            <Text style={s.emptyTitle}>{addTitle}</Text>
-            <Text style={s.emptyText}>
-              {isTeacher
-                ? "Попросите ученика открыть\nПрофиль и продиктовать код"
-                : "Попросите ребёнка открыть\nПрофиль и продиктовать код"}
-            </Text>
-            <TouchableOpacity style={[s.addBtn, { marginTop: 8 }]} onPress={() => setModalOpen(true)}>
-              <Feather name="plus" size={16} color="#fff" />
-              <Text style={s.addBtnText}>Добавить по коду</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
       ) : (
-        <FlatList
-          data={items}
-          keyExtractor={(i) => String(i.id)}
-          contentContainerStyle={s.content}
-          renderItem={({ item }) => (
-            <UserCard item={item} colors={colors} onRemove={() => handleRemove(item)} />
+        <ScrollView contentContainerStyle={s.content}>
+          {/* Pending requests (teacher only) */}
+          {isTeacher && pendingRequests.length > 0 && (
+            <View style={{ marginBottom: 20 }}>
+              <Text style={{
+                fontSize: 12, fontWeight: "700", color: colors.mutedForeground,
+                textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 10,
+              }}>
+                Ожидают подтверждения · {pendingRequests.length}
+              </Text>
+              {pendingRequests.map((req) => {
+                const lm = req.student.knowledgeLevel
+                  ? LEVEL_META[req.student.knowledgeLevel as keyof typeof LEVEL_META]
+                  : null;
+                return (
+                  <View key={req.requestId} style={{
+                    flexDirection: "row", alignItems: "center", gap: 12,
+                    backgroundColor: "#fef3c7", borderRadius: 14, padding: 14,
+                    borderWidth: 1, borderColor: "#fde68a", marginBottom: 8,
+                  }}>
+                    <View style={{
+                      width: 46, height: 46, borderRadius: 23,
+                      backgroundColor: req.student.avatarColor ?? "#6366f1",
+                      justifyContent: "center", alignItems: "center",
+                    }}>
+                      <Text style={{ fontSize: 22 }}>{req.student.avatarEmoji ?? "🦁"}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 15, fontWeight: "700", color: "#92400e" }}>
+                        {req.student.name}
+                      </Text>
+                      <Text style={{ fontSize: 12, color: "#92400eaa" }}>
+                        {lm ? lm.labelRu : "Ожидает ответа..."}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => handleCancelRequest(req)}
+                      style={{ backgroundColor: "#fca5a5", borderRadius: 8, padding: 8 }}
+                    >
+                      <Feather name="x" size={16} color="#7f1d1d" />
+                    </TouchableOpacity>
+                  </View>
+                );
+              })}
+            </View>
           )}
-        />
+
+          {/* Accepted students / children */}
+          {items.length === 0 && pendingRequests.length === 0 ? (
+            <View style={s.empty}>
+              <Text style={s.emptyEmoji}>{isTeacher ? "🎓" : "👨‍👩‍👧"}</Text>
+              <Text style={s.emptyTitle}>{addTitle}</Text>
+              <Text style={s.emptyText}>
+                {isTeacher
+                  ? "Введите код ученика — он увидит заявку и сможет принять"
+                  : "Попросите ребёнка открыть\nПрофиль и продиктовать код"}
+              </Text>
+              <TouchableOpacity style={[s.addBtn, { marginTop: 8 }]} onPress={() => setModalOpen(true)}>
+                <Feather name="plus" size={16} color="#fff" />
+                <Text style={s.addBtnText}>Добавить по коду</Text>
+              </TouchableOpacity>
+            </View>
+          ) : items.length === 0 ? null : (
+            <>
+              {items.length > 0 && pendingRequests.length > 0 && (
+                <Text style={{
+                  fontSize: 12, fontWeight: "700", color: colors.mutedForeground,
+                  textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 10,
+                }}>
+                  Добавлены · {items.length}
+                </Text>
+              )}
+              {items.map((item) => (
+                <UserCard key={item.id} item={item} colors={colors} onRemove={() => handleRemove(item)} />
+              ))}
+            </>
+          )}
+        </ScrollView>
       )}
     </View>
   );

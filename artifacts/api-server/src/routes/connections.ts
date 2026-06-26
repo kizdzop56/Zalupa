@@ -29,7 +29,7 @@ router.get("/connections/by-code/:code", requireAuth, async (req, res) => {
   res.json(user);
 });
 
-// ── Teacher: add student ─────────────────────────────────────────────
+// ── Teacher: send request to student ────────────────────────────────
 router.post("/connections/teacher/add-student", requireAuth, async (req, res) => {
   const caller = getUser(req);
   if (!isTeacher(caller.role)) {
@@ -57,12 +57,16 @@ router.post("/connections/teacher/add-student", requireAuth, async (req, res) =>
       eq(teacherStudentsTable.studentId, student.id),
     ));
   if (existing) {
-    res.status(400).json({ error: "Этот ученик уже прикреплён к вам" }); return;
+    const msg = existing.status === "pending"
+      ? "Запрос уже отправлен, ожидается подтверждение ученика"
+      : "Этот ученик уже прикреплён к вам";
+    res.status(400).json({ error: msg }); return;
   }
 
   await db.insert(teacherStudentsTable).values({
     teacherId: caller.userId,
     studentId: student.id,
+    status: "pending",
   });
 
   res.status(201).json({
@@ -72,10 +76,11 @@ router.post("/connections/teacher/add-student", requireAuth, async (req, res) =>
     avatarEmoji: student.avatarEmoji,
     avatarColor: student.avatarColor,
     knowledgeLevel: student.knowledgeLevel,
+    status: "pending",
   });
 });
 
-// ── Teacher: get my students ─────────────────────────────────────────
+// ── Teacher: get my students (accepted only) ─────────────────────────
 router.get("/connections/teacher/students", requireAuth, async (req, res) => {
   const caller = getUser(req);
   if (!isTeacher(caller.role)) {
@@ -84,7 +89,10 @@ router.get("/connections/teacher/students", requireAuth, async (req, res) => {
 
   const links = await db.select({ studentId: teacherStudentsTable.studentId })
     .from(teacherStudentsTable)
-    .where(eq(teacherStudentsTable.teacherId, caller.userId));
+    .where(and(
+      eq(teacherStudentsTable.teacherId, caller.userId),
+      eq(teacherStudentsTable.status, "accepted"),
+    ));
 
   if (links.length === 0) { res.json([]); return; }
 
@@ -104,7 +112,38 @@ router.get("/connections/teacher/students", requireAuth, async (req, res) => {
   res.json(students);
 });
 
-// ── Teacher: remove student ──────────────────────────────────────────
+// ── Teacher: get pending outgoing requests ───────────────────────────
+router.get("/connections/teacher/pending", requireAuth, async (req, res) => {
+  const caller = getUser(req);
+  if (!isTeacher(caller.role)) { res.status(403).json({ error: "Forbidden" }); return; }
+
+  const links = await db.select({
+    id: teacherStudentsTable.id,
+    studentId: teacherStudentsTable.studentId,
+  }).from(teacherStudentsTable).where(and(
+    eq(teacherStudentsTable.teacherId, caller.userId),
+    eq(teacherStudentsTable.status, "pending"),
+  ));
+
+  if (links.length === 0) { res.json([]); return; }
+
+  const ids = links.map((l) => l.studentId);
+  const students = await db.select({
+    id: usersTable.id, name: usersTable.name, username: usersTable.username,
+    avatarEmoji: usersTable.avatarEmoji, avatarColor: usersTable.avatarColor,
+    knowledgeLevel: usersTable.knowledgeLevel,
+  }).from(usersTable).where(inArray(usersTable.id, ids));
+
+  const studentMap = Object.fromEntries(students.map((s) => [s.id, s]));
+
+  res.json(links.map((l) => ({
+    requestId: l.id,
+    student: studentMap[l.studentId],
+    status: "pending",
+  })));
+});
+
+// ── Teacher: remove student (or cancel pending request) ───────────────
 router.delete("/connections/teacher/students/:studentId", requireAuth, async (req, res) => {
   const caller = getUser(req);
   if (!isTeacher(caller.role)) { res.status(403).json({ error: "Forbidden" }); return; }
@@ -113,6 +152,69 @@ router.delete("/connections/teacher/students/:studentId", requireAuth, async (re
     eq(teacherStudentsTable.teacherId, caller.userId),
     eq(teacherStudentsTable.studentId, Number(req.params["studentId"])),
   ));
+  res.json({ ok: true });
+});
+
+// ── Student: get incoming teacher requests ───────────────────────────
+router.get("/connections/student/teacher-requests", requireAuth, async (req, res) => {
+  const caller = getUser(req);
+
+  const links = await db.select({
+    id: teacherStudentsTable.id,
+    teacherId: teacherStudentsTable.teacherId,
+  }).from(teacherStudentsTable).where(and(
+    eq(teacherStudentsTable.studentId, caller.userId),
+    eq(teacherStudentsTable.status, "pending"),
+  ));
+
+  if (links.length === 0) { res.json([]); return; }
+
+  const ids = links.map((l) => l.teacherId);
+  const teachers = await db.select({
+    id: usersTable.id, name: usersTable.name, username: usersTable.username,
+    avatarEmoji: usersTable.avatarEmoji, avatarColor: usersTable.avatarColor,
+    role: usersTable.role,
+  }).from(usersTable).where(inArray(usersTable.id, ids));
+
+  const teacherMap = Object.fromEntries(teachers.map((t) => [t.id, t]));
+
+  res.json(links.map((l) => ({
+    requestId: l.id,
+    teacher: teacherMap[l.teacherId],
+  })));
+});
+
+// ── Student: accept teacher request ─────────────────────────────────
+router.patch("/connections/student/teacher-requests/:id/accept", requireAuth, async (req, res) => {
+  const caller = getUser(req);
+  const id = Number(req.params["id"]);
+
+  const [link] = await db.select().from(teacherStudentsTable)
+    .where(eq(teacherStudentsTable.id, id));
+  if (!link) { res.status(404).json({ error: "Запрос не найден" }); return; }
+  if (link.studentId !== caller.userId) {
+    res.status(403).json({ error: "Нельзя принять чужой запрос" }); return;
+  }
+
+  await db.update(teacherStudentsTable)
+    .set({ status: "accepted" })
+    .where(eq(teacherStudentsTable.id, id));
+  res.json({ ok: true });
+});
+
+// ── Student: decline teacher request ────────────────────────────────
+router.delete("/connections/student/teacher-requests/:id", requireAuth, async (req, res) => {
+  const caller = getUser(req);
+  const id = Number(req.params["id"]);
+
+  const [link] = await db.select().from(teacherStudentsTable)
+    .where(eq(teacherStudentsTable.id, id));
+  if (!link) { res.status(404).json({ error: "Запрос не найден" }); return; }
+  if (link.studentId !== caller.userId) {
+    res.status(403).json({ error: "Нельзя отклонить чужой запрос" }); return;
+  }
+
+  await db.delete(teacherStudentsTable).where(eq(teacherStudentsTable.id, id));
   res.json({ ok: true });
 });
 

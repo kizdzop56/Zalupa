@@ -3,11 +3,12 @@ import { usersTable } from "./users";
 
 export const friendshipStatusEnum = pgEnum("friendship_status", ["pending", "accepted"]);
 
-// Teacher ↔ Student links
+// Teacher ↔ Student links (now with pending/accepted status)
 export const teacherStudentsTable = pgTable("teacher_students", {
   id: serial("id").primaryKey(),
   teacherId: integer("teacher_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
   studentId: integer("student_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("accepted"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [unique("teacher_student_unique").on(t.teacherId, t.studentId)]);
 

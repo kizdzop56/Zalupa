@@ -438,26 +438,38 @@ export default function ProfileScreen() {
   const [codeCopied, setCodeCopied] = useState(false);
   const [saving, setSaving] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+  const [teacherRequests, setTeacherRequests] = useState<Array<{
+    requestId: number;
+    teacher: { id: number; name: string; username: string; avatarEmoji: string | null; avatarColor: string | null; role: string };
+  }>>([]);
 
   const isStudent = user?.role === "student";
   const isTeacher = isTeacherOrAdmin(user?.role ?? "");
 
-  // Fetch pending friend requests count for badge
+  // Fetch pending friend requests + teacher requests count for badge
   useEffect(() => {
     if (!isStudent) return;
+    const baseUrl = process.env["EXPO_PUBLIC_DOMAIN"]
+      ? `https://${process.env["EXPO_PUBLIC_DOMAIN"]}`
+      : "";
     const load = async () => {
       try {
         const token = await AsyncStorage.getItem("auth_token");
-        const baseUrl = process.env["EXPO_PUBLIC_DOMAIN"]
-          ? `https://${process.env["EXPO_PUBLIC_DOMAIN"]}`
-          : "";
-        const res = await fetch(`${baseUrl}/api/connections/friends`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) return;
-        const data: Array<{ status: string; direction: string }> = await res.json();
-        const count = data.filter((f) => f.status === "pending" && f.direction === "received").length;
-        setPendingCount(count);
+        const headers = { Authorization: `Bearer ${token}` };
+
+        const [friendsRes, teacherRes] = await Promise.all([
+          fetch(`${baseUrl}/api/connections/friends`, { headers }),
+          fetch(`${baseUrl}/api/connections/student/teacher-requests`, { headers }),
+        ]);
+
+        if (friendsRes.ok) {
+          const data: Array<{ status: string; direction: string }> = await friendsRes.json();
+          const count = data.filter((f) => f.status === "pending" && f.direction === "received").length;
+          setPendingCount(count);
+        }
+        if (teacherRes.ok) {
+          setTeacherRequests(await teacherRes.json());
+        }
       } catch { /* silent */ }
     };
     load();
@@ -490,6 +502,23 @@ export default function ProfileScreen() {
   const baseUrl = process.env["EXPO_PUBLIC_DOMAIN"]
     ? `https://${process.env["EXPO_PUBLIC_DOMAIN"]}`
     : "";
+
+  const respondToTeacherRequest = async (requestId: number, accept: boolean) => {
+    try {
+      const token = await AsyncStorage.getItem("auth_token");
+      const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+      if (accept) {
+        await fetch(`${baseUrl}/api/connections/student/teacher-requests/${requestId}/accept`, {
+          method: "PATCH", headers,
+        });
+      } else {
+        await fetch(`${baseUrl}/api/connections/student/teacher-requests/${requestId}`, {
+          method: "DELETE", headers,
+        });
+      }
+      setTeacherRequests((prev) => prev.filter((r) => r.requestId !== requestId));
+    } catch { /* silent */ }
+  };
 
   const saveProfile = async (patch: { avatarEmoji?: string; avatarColor?: string; bio?: string }) => {
     if (!user) return;
@@ -712,6 +741,55 @@ export default function ProfileScreen() {
             >
               <Feather name={codeCopied ? "check" : "copy"} size={18} color="#fff" />
             </TouchableOpacity>
+          </View>
+        )}
+
+        {/* ── Входящие заявки от учителей (только ученик) ── */}
+        {isStudent && teacherRequests.length > 0 && (
+          <View style={{
+            marginHorizontal: 20, marginBottom: 14,
+          }}>
+            <Text style={{
+              fontSize: 12, fontWeight: "700", color: colors.mutedForeground,
+              textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 10,
+            }}>
+              Заявки от учителей · {teacherRequests.length}
+            </Text>
+            {teacherRequests.map((req) => (
+              <View key={req.requestId} style={{
+                flexDirection: "row", alignItems: "center", gap: 12,
+                backgroundColor: colors.card, borderRadius: 14, padding: 14,
+                borderWidth: 1, borderColor: colors.border, marginBottom: 8,
+              }}>
+                <View style={{
+                  width: 46, height: 46, borderRadius: 23,
+                  backgroundColor: req.teacher.avatarColor ?? "#6366f1",
+                  justifyContent: "center", alignItems: "center",
+                }}>
+                  <Text style={{ fontSize: 22 }}>{req.teacher.avatarEmoji ?? "🎓"}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 15, fontWeight: "700", color: colors.foreground }}>
+                    {req.teacher.name}
+                  </Text>
+                  <Text style={{ fontSize: 12, color: colors.mutedForeground }}>хочет добавить вас как ученика</Text>
+                </View>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  <TouchableOpacity
+                    onPress={() => respondToTeacherRequest(req.requestId, false)}
+                    style={{ backgroundColor: colors.destructive + "20", borderRadius: 8, padding: 8 }}
+                  >
+                    <Feather name="x" size={16} color={colors.destructive} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => respondToTeacherRequest(req.requestId, true)}
+                    style={{ backgroundColor: "#10b981" + "20", borderRadius: 8, padding: 8 }}
+                  >
+                    <Feather name="check" size={16} color="#10b981" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
           </View>
         )}
 
