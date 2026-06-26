@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { usersTable, submissionsTable, timeSessionsTable } from "@workspace/db";
-import { eq, and, sql } from "drizzle-orm";
-import { requireAuth, getUser } from "../lib/auth";
+import { usersTable, submissionsTable, timeSessionsTable, assignmentsTable } from "@workspace/db";
+import { eq, and, sql, desc } from "drizzle-orm";
+import { requireAuth, getUser, isTeacher } from "../lib/auth";
 
 const router = Router();
 
@@ -19,7 +19,11 @@ router.get("/users", requireAuth, async (req, res) => {
     name: usersTable.name,
     role: usersTable.role,
     age: usersTable.age,
+    knowledgeLevel: usersTable.knowledgeLevel,
+    avatarEmoji: usersTable.avatarEmoji,
+    avatarColor: usersTable.avatarColor,
     totalPoints: usersTable.totalPoints,
+    totalTimeMinutes: usersTable.totalTimeMinutes,
     createdAt: usersTable.createdAt,
   }).from(usersTable).where(conditions.length > 0 ? and(...conditions) : undefined);
 
@@ -34,21 +38,22 @@ router.get("/users/:id", requireAuth, async (req, res) => {
     return;
   }
 
-  // Get stats for students
-  let totalTimeMinutes = 0;
+  let totalTimeMinutes = user.totalTimeMinutes ?? 0;
   let completedAssignments = 0;
   let averageScore: number | null = null;
 
   if (user.role === "student") {
+    // Add current session time from DB
     const timeSessions = await db.select({ duration: timeSessionsTable.durationMinutes })
       .from(timeSessionsTable).where(eq(timeSessionsTable.studentId, id));
-    totalTimeMinutes = timeSessions.reduce((sum, s) => sum + (s.duration || 0), 0);
+    const sessionMinutes = timeSessions.reduce((sum, s) => sum + (s.duration || 0), 0);
+    totalTimeMinutes = (user.totalTimeMinutes ?? 0) + sessionMinutes;
 
     const submissions = await db.select({ score: submissionsTable.score })
       .from(submissionsTable).where(eq(submissionsTable.studentId, id));
     completedAssignments = submissions.length;
     if (submissions.length > 0) {
-      averageScore = submissions.reduce((sum, s) => sum + s.score, 0) / submissions.length;
+      averageScore = Math.round(submissions.reduce((sum, s) => sum + s.score, 0) / submissions.length);
     }
   }
 
@@ -58,20 +63,40 @@ router.get("/users/:id", requireAuth, async (req, res) => {
     name: user.name,
     role: user.role,
     age: user.age,
+    dateOfBirth: user.dateOfBirth,
+    knowledgeLevel: user.knowledgeLevel,
+    avatarEmoji: user.avatarEmoji,
+    avatarColor: user.avatarColor,
+    bio: user.bio,
     totalPoints: user.totalPoints,
-    createdAt: user.createdAt,
     totalTimeMinutes,
     completedAssignments,
     averageScore,
+    createdAt: user.createdAt,
   });
 });
 
-router.patch("/users/:id", requireAuth, async (req, res) => {
+// Update profile (bio, avatar)
+router.patch("/users/:id/profile", requireAuth, async (req, res) => {
+  const caller = getUser(req);
   const id = Number(req.params["id"]);
-  const { name, age } = req.body;
+
+  // Can only update own profile (or admin/teacher can update anyone)
+  if (caller.userId !== id && !isTeacher(caller.role)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const { bio, avatarEmoji, avatarColor, name } = req.body;
+
+  const updateData: Record<string, any> = { updatedAt: new Date() };
+  if (bio !== undefined) updateData.bio = bio;
+  if (avatarEmoji !== undefined) updateData.avatarEmoji = avatarEmoji;
+  if (avatarColor !== undefined) updateData.avatarColor = avatarColor;
+  if (name !== undefined && name.trim()) updateData.name = name.trim();
 
   const [updated] = await db.update(usersTable)
-    .set({ name, age, updatedAt: new Date() })
+    .set(updateData)
     .where(eq(usersTable.id, id))
     .returning();
 
@@ -79,45 +104,29 @@ router.patch("/users/:id", requireAuth, async (req, res) => {
     id: updated.id,
     username: updated.username,
     name: updated.name,
+    bio: updated.bio,
+    avatarEmoji: updated.avatarEmoji,
+    avatarColor: updated.avatarColor,
     role: updated.role,
-    age: updated.age,
-    totalPoints: updated.totalPoints,
-    createdAt: updated.createdAt,
   });
 });
 
+// Get parent's children
 router.get("/users/:id/children", requireAuth, async (req, res) => {
-  const parentId = Number(req.params["id"]);
-  const children = await db.select().from(usersTable)
-    .where(and(eq(usersTable.parentId, parentId), eq(usersTable.role, "student")));
-
-  const result = await Promise.all(children.map(async (child) => {
-    const timeSessions = await db.select({ duration: timeSessionsTable.durationMinutes })
-      .from(timeSessionsTable).where(eq(timeSessionsTable.studentId, child.id));
-    const totalTimeMinutes = timeSessions.reduce((sum, s) => sum + (s.duration || 0), 0);
-
-    const submissions = await db.select({ score: submissionsTable.score })
-      .from(submissionsTable).where(eq(submissionsTable.studentId, child.id));
-    const completedAssignments = submissions.length;
-    const averageScore = submissions.length > 0
-      ? submissions.reduce((sum, s) => sum + s.score, 0) / submissions.length
-      : null;
-
-    return {
-      id: child.id,
-      username: child.username,
-      name: child.name,
-      role: child.role,
-      age: child.age,
-      totalPoints: child.totalPoints,
-      createdAt: child.createdAt,
-      totalTimeMinutes,
-      completedAssignments,
-      averageScore,
-    };
-  }));
-
-  res.json(result);
+  const id = Number(req.params["id"]);
+  const children = await db.select({
+    id: usersTable.id,
+    username: usersTable.username,
+    name: usersTable.name,
+    role: usersTable.role,
+    age: usersTable.age,
+    knowledgeLevel: usersTable.knowledgeLevel,
+    avatarEmoji: usersTable.avatarEmoji,
+    avatarColor: usersTable.avatarColor,
+    totalPoints: usersTable.totalPoints,
+    createdAt: usersTable.createdAt,
+  }).from(usersTable).where(eq(usersTable.parentId, id));
+  res.json(children);
 });
 
 export default router;

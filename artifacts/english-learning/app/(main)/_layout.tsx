@@ -58,16 +58,25 @@ export default function MainLayout() {
             ) : null,
         }}
       >
-        {/* Assignments — visible for all */}
+        {/* Задания — для всех */}
         <Tabs.Screen
           name="assignments"
           options={{
-            title: isTeacher ? "Задания" : "Учиться",
+            title: isTeacher ? "Задания" : "Задания",
             tabBarIcon: ({ color }) => <Feather name="book-open" size={22} color={color} />,
           }}
         />
 
-        {/* AI Chat — students only */}
+        {/* История — только ученики */}
+        <Tabs.Screen
+          name="history"
+          options={isStudent
+            ? { title: "История", tabBarIcon: ({ color }) => <Feather name="clock" size={22} color={color} /> }
+            : { href: null }
+          }
+        />
+
+        {/* AI Чат — только ученики */}
         <Tabs.Screen
           name="voice-chat"
           options={isStudent
@@ -76,7 +85,7 @@ export default function MainLayout() {
           }
         />
 
-        {/* Leaderboard — students only */}
+        {/* Рейтинг — только ученики */}
         <Tabs.Screen
           name="leaderboard"
           options={isStudent
@@ -85,7 +94,7 @@ export default function MainLayout() {
           }
         />
 
-        {/* Students list — teacher or parent */}
+        {/* Ученики — учитель или родитель */}
         <Tabs.Screen
           name="students"
           options={(isTeacher || isParent)
@@ -97,7 +106,7 @@ export default function MainLayout() {
           }
         />
 
-        {/* Profile — all */}
+        {/* Профиль — для всех */}
         <Tabs.Screen
           name="profile"
           options={{
@@ -106,7 +115,7 @@ export default function MainLayout() {
           }}
         />
 
-        {/* Hidden detail routes */}
+        {/* Скрытые маршруты */}
         <Tabs.Screen name="student/[id]" options={{ href: null }} />
         <Tabs.Screen name="assignment/[id]" options={{ href: null }} />
         <Tabs.Screen name="create-assignment" options={{ href: null }} />

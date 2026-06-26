@@ -3,12 +3,15 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
 export const assignmentTypeEnum = pgEnum("assignment_type", ["text_test", "audio", "reading", "video"]);
+export const assignmentSourceEnum = pgEnum("assignment_source", ["app_suggested", "teacher_created"]);
 
 export const assignmentsTable = pgTable("assignments", {
   id: serial("id").primaryKey(),
   title: text("title").notNull(),
   description: text("description").notNull(),
   type: assignmentTypeEnum("type").notNull(),
+  source: assignmentSourceEnum("source").notNull().default("app_suggested"),
+  createdBy: integer("created_by"), // teacher/admin user id, null = app
   ageMin: integer("age_min").notNull().default(5),
   ageMax: integer("age_max").notNull().default(18),
   points: integer("points").notNull().default(10),

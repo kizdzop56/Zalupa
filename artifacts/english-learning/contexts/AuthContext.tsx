@@ -18,6 +18,10 @@ export interface AuthUser {
   dateOfBirth: string | null;
   knowledgeLevel: KnowledgeLevel | null;
   totalPoints: number;
+  totalTimeMinutes?: number;
+  avatarEmoji?: string;
+  avatarColor?: string;
+  bio?: string;
   createdAt: string;
 }
 

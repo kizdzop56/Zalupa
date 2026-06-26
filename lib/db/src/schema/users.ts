@@ -23,6 +23,11 @@ export const usersTable = pgTable("users", {
   knowledgeLevel: knowledgeLevelEnum("knowledge_level"),
   parentId: integer("parent_id"),
   totalPoints: integer("total_points").notNull().default(0),
+  // Profile extras
+  bio: text("bio"),
+  avatarEmoji: text("avatar_emoji").default("🦁"),
+  avatarColor: text("avatar_color").default("#6366f1"),
+  totalTimeMinutes: integer("total_time_minutes").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
