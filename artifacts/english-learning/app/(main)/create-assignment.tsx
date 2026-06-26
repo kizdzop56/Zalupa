@@ -1,9 +1,10 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useCallback } from "react";
 import {
   View, Text, TextInput, StyleSheet, ScrollView,
-  TouchableOpacity, ActivityIndicator, Platform,
+  TouchableOpacity, ActivityIndicator, Platform, Switch,
 } from "react-native";
 import { useRouter } from "expo-router";
+import { useFocusEffect } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
@@ -42,8 +43,8 @@ type QuestionDraft = {
   text: string;
   format: QuestionFormat;
   correctAnswer: string;
-  options: string[];      // для формата "choice"
-  correctIndex: number;   // индекс правильного варианта в options
+  options: string[];
+  correctIndex: number;
 };
 
 const DEFAULT_QUESTION = (): QuestionDraft => ({
@@ -54,93 +55,98 @@ const DEFAULT_QUESTION = (): QuestionDraft => ({
   correctIndex: 0,
 });
 
+const FRESH_STATE = () => ({
+  type: "text_test" as AssignmentType,
+  title: "",
+  description: "",
+  ageMin: "5",
+  ageMax: "18",
+  points: "10",
+  content: "",
+  mediaUrl: "",
+  mediaInputMode: "url" as "url" | "file",
+  uploadedFileName: "",
+  timerEnabled: false,
+  timerMinutes: "30",
+  questions: [DEFAULT_QUESTION()],
+  formError: "",
+  success: false,
+});
+
 export default function CreateAssignmentScreen() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [type, setType] = useState<AssignmentType>("text_test");
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [ageMin, setAgeMin] = useState("5");
-  const [ageMax, setAgeMax] = useState("18");
-  const [points, setPoints] = useState("10");
-  const [content, setContent] = useState("");
-  const [mediaUrl, setMediaUrl] = useState("");
-  const [mediaInputMode, setMediaInputMode] = useState<"url" | "file">("url");
-  const [uploadedFileName, setUploadedFileName] = useState("");
+  const [state, setState] = useState(FRESH_STATE());
   const [uploading, setUploading] = useState(false);
-  const [questions, setQuestions] = useState<QuestionDraft[]>([DEFAULT_QUESTION()]);
   const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState("");
-  const [success, setSuccess] = useState(false);
   const fileInputRef = useRef<any>(null);
 
+  const set = <K extends keyof ReturnType<typeof FRESH_STATE>>(k: K, v: ReturnType<typeof FRESH_STATE>[K]) =>
+    setState(prev => ({ ...prev, [k]: v }));
+
+  // Reset all state every time the screen comes into focus
+  useFocusEffect(useCallback(() => {
+    setState(FRESH_STATE());
+    setUploading(false);
+    setSaving(false);
+  }, []));
+
+  const { type, title, description, ageMin, ageMax, points, content, mediaUrl,
+    mediaInputMode, uploadedFileName, timerEnabled, timerMinutes,
+    questions, formError, success } = state;
+
   // ── Question helpers ────────────────────────────────────────────────
-  const addQuestion = () => setQuestions((p) => [...p, DEFAULT_QUESTION()]);
+  const addQuestion = () => setState(p => ({ ...p, questions: [...p.questions, DEFAULT_QUESTION()] }));
   const removeQuestion = (i: number) =>
-    setQuestions((p) => p.filter((_, idx) => idx !== i));
+    setState(p => ({ ...p, questions: p.questions.filter((_, idx) => idx !== i) }));
   const updateQ = <K extends keyof QuestionDraft>(i: number, key: K, val: QuestionDraft[K]) =>
-    setQuestions((p) => p.map((q, idx) => idx === i ? { ...q, [key]: val } : q));
+    setState(p => ({ ...p, questions: p.questions.map((q, idx) => idx === i ? { ...q, [key]: val } : q) }));
   const updateOption = (qi: number, oi: number, val: string) =>
-    setQuestions((p) => p.map((q, idx) =>
+    setState(p => ({ ...p, questions: p.questions.map((q, idx) =>
       idx === qi ? { ...q, options: q.options.map((o, j) => j === oi ? val : o) } : q
-    ));
+    )}));
   const addOption = (qi: number) =>
-    setQuestions((p) => p.map((q, idx) =>
+    setState(p => ({ ...p, questions: p.questions.map((q, idx) =>
       idx === qi && q.options.length < 6 ? { ...q, options: [...q.options, ""] } : q
-    ));
+    )}));
   const removeOption = (qi: number, oi: number) =>
-    setQuestions((p) => p.map((q, idx) => {
+    setState(p => ({ ...p, questions: p.questions.map((q, idx) => {
       if (idx !== qi || q.options.length <= 2) return q;
       const next = q.options.filter((_, j) => j !== oi);
       const newCorrectIdx = q.correctIndex >= next.length ? next.length - 1 : q.correctIndex;
       return { ...q, options: next, correctIndex: newCorrectIdx };
-    }));
+    })}));
 
   // ── Submit ──────────────────────────────────────────────────────────
   const handleSubmit = async () => {
-    setFormError("");
+    set("formError", "");
 
-    // Validation
-    if (!title.trim()) { setFormError("Введите название задания"); return; }
-    if (!description.trim()) { setFormError("Введите описание задания"); return; }
+    if (!title.trim()) { set("formError", "Введите название задания"); return; }
+    if (!description.trim()) { set("formError", "Введите описание задания"); return; }
 
     const ageMinNum = parseInt(ageMin, 10);
     const ageMaxNum = parseInt(ageMax, 10);
-    if (isNaN(ageMinNum) || ageMinNum < 1 || ageMinNum > 100) {
-      setFormError("Возраст «от» введён некорректно (1–100)");
-      return;
-    }
-    if (isNaN(ageMaxNum) || ageMaxNum < 1 || ageMaxNum > 100) {
-      setFormError("Возраст «до» введён некорректно (1–100)");
-      return;
-    }
-    if (ageMinNum > ageMaxNum) {
-      setFormError("Возраст «от» не может быть больше возраста «до»");
-      return;
+    if (isNaN(ageMinNum) || ageMinNum < 1 || ageMinNum > 100) { set("formError", "Возраст «от» введён некорректно (1–100)"); return; }
+    if (isNaN(ageMaxNum) || ageMaxNum < 1 || ageMaxNum > 100) { set("formError", "Возраст «до» введён некорректно (1–100)"); return; }
+    if (ageMinNum > ageMaxNum) { set("formError", "Возраст «от» не может быть больше возраста «до»"); return; }
+
+    if (timerEnabled) {
+      const mins = parseInt(timerMinutes, 10);
+      if (isNaN(mins) || mins < 1 || mins > 360) { set("formError", "Таймер: введите число от 1 до 360 минут"); return; }
     }
 
     const questionPayload = questions
-      .filter((q) => q.text.trim())
+      .filter(q => q.text.trim())
       .map((q, i) => {
         if (q.format === "choice") {
-          const filledOptions = q.options.filter((o) => o.trim());
+          const filledOptions = q.options.filter(o => o.trim());
           if (filledOptions.length < 2) return null;
           const correct = filledOptions[q.correctIndex] ?? filledOptions[0];
-          return {
-            text: q.text.trim(),
-            options: filledOptions,
-            correctAnswer: correct.trim(),
-            orderIndex: i,
-          };
+          return { text: q.text.trim(), options: filledOptions, correctAnswer: correct.trim(), orderIndex: i };
         }
-        return {
-          text: q.text.trim(),
-          options: [] as string[],
-          correctAnswer: q.correctAnswer.trim(),
-          orderIndex: i,
-        };
+        return { text: q.text.trim(), options: [] as string[], correctAnswer: q.correctAnswer.trim(), orderIndex: i };
       })
       .filter(Boolean);
 
@@ -161,14 +167,38 @@ export default function CreateAssignmentScreen() {
           content: finalContent,
           mediaUrl: finalMediaUrl,
           questions: questionPayload,
+          timeLimitMinutes: timerEnabled ? parseInt(timerMinutes, 10) : null,
         }),
       });
-      setSuccess(true);
-      setTimeout(() => router.back(), 1200);
+      set("success", true);
+      setTimeout(() => router.back(), 900);
     } catch (e: any) {
-      setFormError(e?.message ?? "Не удалось создать задание");
+      set("formError", e?.message ?? "Не удалось создать задание");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleFileUpload = async (file: File) => {
+    setUploading(true);
+    set("formError", "");
+    try {
+      const token = await AsyncStorage.getItem("auth_token");
+      const form = new FormData();
+      form.append("file", file);
+      const endpoint = type === "audio" ? "/api/upload/audio" : "/api/upload/video";
+      const res = await fetch(`${BASE}${endpoint}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token ?? ""}` },
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Ошибка загрузки");
+      setState(p => ({ ...p, mediaUrl: data.url, uploadedFileName: file.name }));
+    } catch (e: any) {
+      set("formError", e.message);
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -201,10 +231,33 @@ export default function CreateAssignmentScreen() {
       backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
       borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
       fontSize: 15, color: colors.foreground, marginBottom: 12,
+      ...(Platform.OS === "web" ? { outlineWidth: 0, outlineStyle: "none" } as any : {}),
     },
     textArea: { minHeight: 90, textAlignVertical: "top" },
     row: { flexDirection: "row", gap: 12 },
     half: { flex: 1 },
+    timerRow: {
+      flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+      backgroundColor: colors.card, borderRadius: 14, padding: 14,
+      borderWidth: 1, borderColor: colors.border, marginBottom: 12,
+    },
+    timerLeft: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
+    timerIcon: {
+      width: 36, height: 36, borderRadius: 10,
+      backgroundColor: "#f59e0b20", justifyContent: "center", alignItems: "center",
+    },
+    timerInputRow: {
+      flexDirection: "row", alignItems: "center", gap: 10,
+      backgroundColor: colors.card, borderRadius: 14, padding: 14,
+      borderWidth: 1, borderColor: "#f59e0b40", marginBottom: 12,
+    },
+    timerInput: {
+      backgroundColor: colors.background, borderWidth: 1.5, borderColor: "#f59e0b",
+      borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10,
+      fontSize: 18, fontWeight: "800", color: colors.foreground,
+      width: 80, textAlign: "center",
+      ...(Platform.OS === "web" ? { outlineWidth: 0, outlineStyle: "none" } as any : {}),
+    },
     questionCard: {
       backgroundColor: colors.card, borderRadius: 16, padding: 14,
       borderWidth: 1, borderColor: colors.border, marginBottom: 12,
@@ -220,23 +273,17 @@ export default function CreateAssignmentScreen() {
       gap: 5, paddingVertical: 8, borderRadius: 10, borderWidth: 1.5,
     },
     formatBtnText: { fontSize: 13, fontWeight: "600" },
-    optionRow: {
-      flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8,
-    },
-    radio: {
-      width: 22, height: 22, borderRadius: 11, borderWidth: 2,
-      justifyContent: "center", alignItems: "center",
-    },
+    optionRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 8 },
     optionInput: {
       flex: 1, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border,
       borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9,
       fontSize: 14, color: colors.foreground,
+      ...(Platform.OS === "web" ? { outlineWidth: 0, outlineStyle: "none" } as any : {}),
     },
     addOptBtn: {
       flexDirection: "row", alignItems: "center", justifyContent: "center",
       gap: 5, paddingVertical: 8, borderRadius: 10,
-      borderWidth: 1.5, borderColor: colors.border, borderStyle: "dashed",
-      marginBottom: 4,
+      borderWidth: 1.5, borderColor: colors.border, borderStyle: "dashed", marginBottom: 4,
     },
     addQBtn: {
       flexDirection: "row", alignItems: "center", gap: 6, justifyContent: "center",
@@ -250,36 +297,31 @@ export default function CreateAssignmentScreen() {
       flexDirection: "row", justifyContent: "center", gap: 8,
     },
     submitText: { fontSize: 16, fontWeight: "700", color: "#fff" },
+    successBanner: {
+      backgroundColor: "#f0fdf4", borderRadius: 14, padding: 16,
+      alignItems: "center", gap: 8, borderWidth: 1.5, borderColor: "#86efac", marginTop: 8,
+    },
   });
 
-  const handleFileUpload = async (file: File) => {
-    setUploading(true);
-    setFormError("");
-    try {
-      const token = await AsyncStorage.getItem("auth_token");
-      const form = new FormData();
-      form.append("file", file);
-      const endpoint = type === "audio" ? "/api/upload/audio" : "/api/upload/video";
-      const res = await fetch(`${BASE}${endpoint}`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token ?? ""}` },
-        body: form,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Ошибка загрузки");
-      setMediaUrl(data.url);
-      setUploadedFileName(file.name);
-    } catch (e: any) {
-      setFormError(e.message);
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const contentLabel =
-    type === "reading" ? "Текст для чтения"
-    : type === "audio" ? "Ссылка на аудио"
-    : "Ссылка на видео";
+  if (success) {
+    return (
+      <View style={s.container}>
+        <View style={s.header}>
+          <TouchableOpacity style={s.backBtn} onPress={() => router.back()}>
+            <Feather name="arrow-left" size={22} color={colors.foreground} />
+          </TouchableOpacity>
+          <Text style={s.headerTitle}>Создать задание</Text>
+        </View>
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center", gap: 16 }}>
+          <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: "#f0fdf4", justifyContent: "center", alignItems: "center", borderWidth: 2, borderColor: "#86efac" }}>
+            <Feather name="check" size={36} color="#22c55e" />
+          </View>
+          <Text style={{ fontSize: 20, fontWeight: "800", color: colors.foreground }}>Задание создано!</Text>
+          <Text style={{ fontSize: 14, color: colors.mutedForeground }}>Возвращаемся к заданиям…</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={s.container}>
@@ -300,7 +342,7 @@ export default function CreateAssignmentScreen() {
               <TouchableOpacity
                 key={t.key}
                 style={[s.typeBtn, type === t.key && s.typeBtnActive]}
-                onPress={() => setType(t.key)}
+                onPress={() => set("type", t.key)}
               >
                 <Feather name={t.icon as any} size={16} color={type === t.key ? colors.primary : colors.mutedForeground} />
                 <Text style={[s.typeBtnText, type === t.key && s.typeBtnTextActive]}>{t.label}</Text>
@@ -315,14 +357,14 @@ export default function CreateAssignmentScreen() {
 
           <Text style={s.label}>Название</Text>
           <TextInput
-            style={s.input} value={title} onChangeText={setTitle}
+            style={s.input} value={title} onChangeText={v => set("title", v)}
             placeholder="Например: Глаголы прошедшего времени"
             placeholderTextColor={colors.mutedForeground}
           />
 
           <Text style={s.label}>Описание</Text>
           <TextInput
-            style={[s.input, s.textArea]} value={description} onChangeText={setDescription}
+            style={[s.input, s.textArea]} value={description} onChangeText={v => set("description", v)}
             placeholder="Краткое описание задания для ученика"
             placeholderTextColor={colors.mutedForeground}
             multiline
@@ -331,20 +373,62 @@ export default function CreateAssignmentScreen() {
           <View style={s.row}>
             <View style={s.half}>
               <Text style={s.label}>Возраст от</Text>
-              <TextInput style={s.input} value={ageMin} onChangeText={setAgeMin} keyboardType="numeric" placeholder="5" placeholderTextColor={colors.mutedForeground} />
+              <TextInput style={s.input} value={ageMin} onChangeText={v => set("ageMin", v)} keyboardType="numeric" placeholder="5" placeholderTextColor={colors.mutedForeground} />
             </View>
             <View style={s.half}>
               <Text style={s.label}>Возраст до</Text>
-              <TextInput style={s.input} value={ageMax} onChangeText={setAgeMax} keyboardType="numeric" placeholder="18" placeholderTextColor={colors.mutedForeground} />
+              <TextInput style={s.input} value={ageMax} onChangeText={v => set("ageMax", v)} keyboardType="numeric" placeholder="18" placeholderTextColor={colors.mutedForeground} />
             </View>
           </View>
 
           <Text style={s.label}>Баллы за выполнение</Text>
           <TextInput
-            style={s.input} value={points} onChangeText={setPoints}
+            style={s.input} value={points} onChangeText={v => set("points", v)}
             keyboardType="numeric" placeholder="10"
             placeholderTextColor={colors.mutedForeground}
           />
+        </View>
+
+        {/* Таймер */}
+        <View style={s.section}>
+          <Text style={s.sectionTitle}>Таймер</Text>
+
+          <View style={s.timerRow}>
+            <View style={s.timerLeft}>
+              <View style={s.timerIcon}>
+                <Feather name="clock" size={18} color="#f59e0b" />
+              </View>
+              <View>
+                <Text style={{ fontSize: 15, fontWeight: "700", color: colors.foreground }}>Ограничение по времени</Text>
+                <Text style={{ fontSize: 12, color: colors.mutedForeground, marginTop: 1 }}>
+                  {timerEnabled ? `${timerMinutes} мин — по истечении ответить нельзя` : "Без ограничения"}
+                </Text>
+              </View>
+            </View>
+            <Switch
+              value={timerEnabled}
+              onValueChange={v => set("timerEnabled", v)}
+              trackColor={{ false: colors.border, true: "#f59e0b" }}
+              thumbColor="#fff"
+            />
+          </View>
+
+          {timerEnabled && (
+            <View style={s.timerInputRow}>
+              <Feather name="clock" size={16} color="#f59e0b" />
+              <Text style={{ fontSize: 14, color: colors.foreground, fontWeight: "600" }}>Время:</Text>
+              <TextInput
+                style={s.timerInput}
+                value={timerMinutes}
+                onChangeText={v => set("timerMinutes", v.replace(/[^0-9]/g, ""))}
+                keyboardType="numeric"
+                maxLength={3}
+                placeholderTextColor={colors.mutedForeground}
+              />
+              <Text style={{ fontSize: 14, color: colors.foreground, fontWeight: "600" }}>мин</Text>
+              <Text style={{ fontSize: 12, color: colors.mutedForeground, flex: 1 }}>(1–360)</Text>
+            </View>
+          )}
         </View>
 
         {/* Контент (чтение / аудио / видео) */}
@@ -354,7 +438,7 @@ export default function CreateAssignmentScreen() {
             <Text style={s.label}>Текст для чтения</Text>
             <TextInput
               style={[s.input, s.textArea]}
-              value={content} onChangeText={setContent}
+              value={content} onChangeText={v => set("content", v)}
               placeholder="Вставьте текст для чтения..."
               placeholderTextColor={colors.mutedForeground}
               multiline
@@ -366,7 +450,6 @@ export default function CreateAssignmentScreen() {
           <View style={s.section}>
             <Text style={s.sectionTitle}>Медиафайл</Text>
 
-            {/* Mode toggle */}
             <View style={{ flexDirection: "row", gap: 8, marginBottom: 14 }}>
               {(["url", "file"] as const).map((mode) => {
                 const active = mediaInputMode === mode;
@@ -378,13 +461,9 @@ export default function CreateAssignmentScreen() {
                       backgroundColor: active ? colors.primary + "12" : colors.background,
                       flex: 1,
                     }]}
-                    onPress={() => setMediaInputMode(mode)}
+                    onPress={() => set("mediaInputMode", mode)}
                   >
-                    <Feather
-                      name={mode === "url" ? "link" : "upload"}
-                      size={14}
-                      color={active ? colors.primary : colors.mutedForeground}
-                    />
+                    <Feather name={mode === "url" ? "link" : "upload"} size={14} color={active ? colors.primary : colors.mutedForeground} />
                     <Text style={[s.formatBtnText, { color: active ? colors.primary : colors.mutedForeground }]}>
                       {mode === "url" ? "По ссылке" : "Загрузить файл"}
                     </Text>
@@ -395,12 +474,10 @@ export default function CreateAssignmentScreen() {
 
             {mediaInputMode === "url" ? (
               <>
-                <Text style={s.label}>
-                  {type === "audio" ? "Ссылка на аудио" : "Ссылка на видео"}
-                </Text>
+                <Text style={s.label}>{type === "audio" ? "Ссылка на аудио" : "Ссылка на видео"}</Text>
                 <TextInput
                   style={s.input}
-                  value={mediaUrl} onChangeText={setMediaUrl}
+                  value={mediaUrl} onChangeText={v => set("mediaUrl", v)}
                   placeholder={type === "audio" ? "https://example.com/audio.mp3" : "https://youtube.com/watch?v=..."}
                   placeholderTextColor={colors.mutedForeground}
                   autoCapitalize="none"
@@ -409,11 +486,8 @@ export default function CreateAssignmentScreen() {
               </>
             ) : (
               <>
-                <Text style={s.label}>
-                  {type === "audio" ? "Аудиофайл (MP3, M4A, WAV)" : "Видеофайл (MP4, MOV)"}
-                </Text>
+                <Text style={s.label}>{type === "audio" ? "Аудиофайл (MP3, M4A, WAV)" : "Видеофайл (MP4, MOV)"}</Text>
 
-                {/* Uploaded file indicator */}
                 {uploadedFileName ? (
                   <View style={{
                     flexDirection: "row", alignItems: "center", gap: 10,
@@ -421,10 +495,8 @@ export default function CreateAssignmentScreen() {
                     borderRadius: 12, padding: 12, marginBottom: 8,
                   }}>
                     <Feather name="check-circle" size={16} color={colors.success} />
-                    <Text style={{ flex: 1, fontSize: 13, color: colors.success, fontWeight: "600" }}>
-                      {uploadedFileName}
-                    </Text>
-                    <TouchableOpacity onPress={() => { setMediaUrl(""); setUploadedFileName(""); }}>
+                    <Text style={{ flex: 1, fontSize: 13, color: colors.success, fontWeight: "600" }}>{uploadedFileName}</Text>
+                    <TouchableOpacity onPress={() => setState(p => ({ ...p, mediaUrl: "", uploadedFileName: "" }))}>
                       <Feather name="x" size={16} color={colors.success} />
                     </TouchableOpacity>
                   </View>
@@ -432,7 +504,6 @@ export default function CreateAssignmentScreen() {
 
                 {Platform.OS === "web" ? (
                   <>
-                    {/* Hidden HTML file input for web */}
                     {/* @ts-ignore */}
                     <input
                       type="file"
@@ -459,14 +530,13 @@ export default function CreateAssignmentScreen() {
                     </TouchableOpacity>
                   </>
                 ) : (
-                  /* Native: show URL input as fallback */
                   <>
                     <Text style={{ fontSize: 12, color: colors.mutedForeground, marginBottom: 8 }}>
                       На мобильных устройствах используйте ссылку:
                     </Text>
                     <TextInput
                       style={s.input}
-                      value={mediaUrl} onChangeText={setMediaUrl}
+                      value={mediaUrl} onChangeText={v => set("mediaUrl", v)}
                       placeholder={type === "audio" ? "https://example.com/audio.mp3" : "https://youtube.com/watch?v=..."}
                       placeholderTextColor={colors.mutedForeground}
                       autoCapitalize="none"
@@ -485,7 +555,6 @@ export default function CreateAssignmentScreen() {
 
           {questions.map((q, qi) => (
             <View key={qi} style={s.questionCard}>
-              {/* Header */}
               <View style={s.questionHeader}>
                 <Text style={s.questionNum}>Вопрос {qi + 1}</Text>
                 {questions.length > 1 && (
@@ -495,35 +564,28 @@ export default function CreateAssignmentScreen() {
                 )}
               </View>
 
-              {/* Question text */}
               <TextInput
                 style={[s.input, s.textArea, { minHeight: 60 }]}
                 value={q.text}
-                onChangeText={(v) => updateQ(qi, "text", v)}
+                onChangeText={v => updateQ(qi, "text", v)}
                 placeholder="Текст вопроса"
                 placeholderTextColor={colors.mutedForeground}
                 multiline
               />
 
-              {/* Format selector */}
               <View style={s.formatRow}>
                 {(["open", "choice"] as QuestionFormat[]).map((fmt) => {
                   const active = q.format === fmt;
                   return (
                     <TouchableOpacity
                       key={fmt}
-                      style={[
-                        s.formatBtn,
-                        { borderColor: active ? colors.primary : colors.border,
-                          backgroundColor: active ? colors.primary + "12" : colors.background },
-                      ]}
+                      style={[s.formatBtn, {
+                        borderColor: active ? colors.primary : colors.border,
+                        backgroundColor: active ? colors.primary + "12" : colors.background,
+                      }]}
                       onPress={() => updateQ(qi, "format", fmt)}
                     >
-                      <Feather
-                        name={fmt === "open" ? "edit-2" : "list"}
-                        size={14}
-                        color={active ? colors.primary : colors.mutedForeground}
-                      />
+                      <Feather name={fmt === "open" ? "edit-2" : "list"} size={14} color={active ? colors.primary : colors.mutedForeground} />
                       <Text style={[s.formatBtnText, { color: active ? colors.primary : colors.mutedForeground }]}>
                         {fmt === "open" ? "Свободный ответ" : "Варианты ответов"}
                       </Text>
@@ -532,68 +594,49 @@ export default function CreateAssignmentScreen() {
                 })}
               </View>
 
-              {/* Open text answer */}
               {q.format === "open" && (
                 <TextInput
                   style={s.input}
                   value={q.correctAnswer}
-                  onChangeText={(v) => updateQ(qi, "correctAnswer", v)}
+                  onChangeText={v => updateQ(qi, "correctAnswer", v)}
                   placeholder="Правильный ответ"
                   placeholderTextColor={colors.mutedForeground}
                 />
               )}
 
-              {/* Multiple choice options */}
               {q.format === "choice" && (
                 <View>
-                  <Text style={{ fontSize: 12, fontWeight: "700", color: colors.mutedForeground, marginBottom: 8 }}>
-                    ВАРИАНТЫ · выбери правильный
-                  </Text>
-                  {q.options.map((opt, oi) => {
-                    const isCorrect = q.correctIndex === oi;
-                    return (
-                      <View key={oi} style={s.optionRow}>
-                        {/* Radio button */}
-                        <TouchableOpacity
-                          style={[
-                            s.radio,
-                            { borderColor: isCorrect ? "#10b981" : colors.border,
-                              backgroundColor: isCorrect ? "#10b981" : "transparent" },
-                          ]}
-                          onPress={() => updateQ(qi, "correctIndex", oi)}
-                        >
-                          {isCorrect && <Feather name="check" size={13} color="#fff" />}
+                  {q.options.map((opt, oi) => (
+                    <View key={oi} style={s.optionRow}>
+                      <TouchableOpacity
+                        style={[{
+                          width: 22, height: 22, borderRadius: 11, borderWidth: 2,
+                          justifyContent: "center", alignItems: "center",
+                          borderColor: q.correctIndex === oi ? colors.primary : colors.border,
+                          backgroundColor: q.correctIndex === oi ? colors.primary : "transparent",
+                        }]}
+                        onPress={() => updateQ(qi, "correctIndex", oi)}
+                      >
+                        {q.correctIndex === oi && <Feather name="check" size={13} color="#fff" />}
+                      </TouchableOpacity>
+                      <TextInput
+                        style={s.optionInput}
+                        value={opt}
+                        onChangeText={v => updateOption(qi, oi, v)}
+                        placeholder={`Вариант ${oi + 1}`}
+                        placeholderTextColor={colors.mutedForeground}
+                      />
+                      {q.options.length > 2 && (
+                        <TouchableOpacity onPress={() => removeOption(qi, oi)}>
+                          <Feather name="x" size={16} color={colors.destructive} />
                         </TouchableOpacity>
-
-                        {/* Option text */}
-                        <TextInput
-                          style={[
-                            s.optionInput,
-                            isCorrect && { borderColor: "#10b981", backgroundColor: "#f0fdf4" },
-                          ]}
-                          value={opt}
-                          onChangeText={(v) => updateOption(qi, oi, v)}
-                          placeholder={`Вариант ${oi + 1}`}
-                          placeholderTextColor={colors.mutedForeground}
-                        />
-
-                        {/* Remove option */}
-                        {q.options.length > 2 && (
-                          <TouchableOpacity onPress={() => removeOption(qi, oi)}>
-                            <Feather name="x" size={16} color={colors.mutedForeground} />
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                    );
-                  })}
-
-                  {/* Add option */}
+                      )}
+                    </View>
+                  ))}
                   {q.options.length < 6 && (
                     <TouchableOpacity style={s.addOptBtn} onPress={() => addOption(qi)}>
                       <Feather name="plus" size={14} color={colors.mutedForeground} />
-                      <Text style={{ fontSize: 13, color: colors.mutedForeground, fontWeight: "600" }}>
-                        Добавить вариант
-                      </Text>
+                      <Text style={{ fontSize: 13, color: colors.mutedForeground }}>Добавить вариант</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -607,35 +650,19 @@ export default function CreateAssignmentScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Inline error */}
+        {/* Ошибки и кнопка */}
         {!!formError && (
-          <View style={{
-            backgroundColor: "#fef2f2", borderWidth: 1, borderColor: "#fca5a5",
-            borderRadius: 12, padding: 12, marginBottom: 12, flexDirection: "row", alignItems: "center", gap: 8,
-          }}>
-            <Feather name="alert-circle" size={16} color={colors.destructive} />
-            <Text style={{ fontSize: 14, color: colors.destructive, flex: 1 }}>{formError}</Text>
+          <View style={{ backgroundColor: "#fef2f2", borderRadius: 12, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: "#fca5a5" }}>
+            <Text style={{ color: colors.destructive, fontSize: 14, fontWeight: "600" }}>{formError}</Text>
           </View>
         )}
 
-        {/* Success banner */}
-        {success && (
-          <View style={{
-            backgroundColor: "#f0fdf4", borderWidth: 1, borderColor: "#86efac",
-            borderRadius: 12, padding: 12, marginBottom: 12, flexDirection: "row", alignItems: "center", gap: 8,
-          }}>
-            <Feather name="check-circle" size={16} color={colors.success} />
-            <Text style={{ fontSize: 14, color: colors.success, fontWeight: "600" }}>Задание создано!</Text>
-          </View>
-        )}
-
-        {/* Submit */}
-        <TouchableOpacity style={[s.submitBtn, success && { backgroundColor: colors.success }]} onPress={handleSubmit} disabled={saving || success}>
+        <TouchableOpacity style={s.submitBtn} onPress={handleSubmit} disabled={saving}>
           {saving
             ? <ActivityIndicator color="#fff" />
             : <>
                 <Feather name="check" size={18} color="#fff" />
-                <Text style={s.submitText}>{success ? "Готово!" : "Сохранить черновик"}</Text>
+                <Text style={s.submitText}>Создать задание</Text>
               </>
           }
         </TouchableOpacity>

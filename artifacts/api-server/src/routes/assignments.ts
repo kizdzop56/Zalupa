@@ -195,7 +195,7 @@ router.post("/assignments", requireAuth, async (req, res) => {
     res.status(403).json({ error: "Forbidden" }); return;
   }
 
-  const { title, description, type, ageMin, ageMax, points, mediaUrl, content, questions, isDraft } = req.body;
+  const { title, description, type, ageMin, ageMax, points, mediaUrl, content, questions, isDraft, timeLimitMinutes } = req.body;
 
   if (!title?.trim()) { res.status(400).json({ error: "Введите название задания" }); return; }
   if (!description?.trim()) { res.status(400).json({ error: "Введите описание задания" }); return; }
@@ -213,6 +213,7 @@ router.post("/assignments", requireAuth, async (req, res) => {
     mediaUrl: mediaUrl?.trim() || null,
     content: content?.trim() || null,
     isDraft: isDraft !== false,
+    timeLimitMinutes: timeLimitMinutes ? Number(timeLimitMinutes) : null,
   }).returning();
 
   if (questions && questions.length > 0) {

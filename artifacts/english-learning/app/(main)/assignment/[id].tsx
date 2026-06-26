@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   ActivityIndicator, Platform, Alert, TextInput, Linking,
@@ -49,6 +49,7 @@ type AssignmentDetail = {
   content: string | null;
   mediaUrl: string | null;
   isDraft: boolean;
+  timeLimitMinutes: number | null;
   questions: Question[];
 };
 
@@ -65,6 +66,12 @@ const TYPE_LABELS: Record<string, string> = {
   reading: "Чтение",
   video: "Видео",
 };
+
+function formatTime(seconds: number) {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
 
 export default function AssignmentDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -83,10 +90,17 @@ export default function AssignmentDetailScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<any>(null);
 
+  // Timer state
+  const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  const [timerExpired, setTimerExpired] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const autoSubmitRef = useRef(false);
+
   const isAdmin = user?.role === "admin";
   const isTeacherRole = user?.role === "teacher" || user?.role === "admin";
+  const isStudent = user?.role === "student";
 
-  // Load assignment — also resets all answer state when navigating to a different assignment
+  // Load assignment
   useEffect(() => {
     if (!assignmentId) return;
     setAssignment(null);
@@ -95,19 +109,51 @@ export default function AssignmentDetailScreen() {
     setResult(null);
     setIsLoading(true);
     setFetchError(null);
+    setTimeLeft(null);
+    setTimerExpired(false);
+    autoSubmitRef.current = false;
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     apiFetch(`/api/assignments/${assignmentId}`)
       .then(setAssignment)
       .catch((e: Error) => setFetchError(e.message))
       .finally(() => setIsLoading(false));
   }, [assignmentId]);
 
-  const handleSubmit = async () => {
+  // Start timer when assignment loads (students only)
+  useEffect(() => {
+    if (!assignment || !isStudent || submitted) return;
+    if (!assignment.timeLimitMinutes) return;
+
+    const totalSeconds = assignment.timeLimitMinutes * 60;
+    setTimeLeft(totalSeconds);
+
+    timerRef.current = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev === null || prev <= 1) {
+          clearInterval(timerRef.current!);
+          timerRef.current = null;
+          setTimerExpired(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => {
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    };
+  }, [assignment?.id, isStudent]);
+
+  // Auto-submit when timer expires
+  const handleSubmit = useCallback(async (forcedAnswers?: Record<number, string>) => {
     if (!assignment) return;
+    if (submitting) return;
     setSubmitting(true);
+    const currentAnswers = forcedAnswers ?? answers;
     try {
       const answerList = (assignment.questions || []).map((q: Question) => ({
         questionId: q.id,
-        answer: answers[q.id] || "",
+        answer: currentAnswers[q.id] || "",
       }));
       const data = await apiFetch(`/api/assignments/${assignmentId}/submit`, {
         method: "POST",
@@ -120,7 +166,18 @@ export default function AssignmentDetailScreen() {
     } finally {
       setSubmitting(false);
     }
-  };
+  }, [assignment, answers, assignmentId, submitting]);
+
+  useEffect(() => {
+    if (timerExpired && !submitted && !autoSubmitRef.current) {
+      autoSubmitRef.current = true;
+      // Capture current answers at expiry time
+      setAnswers(prev => {
+        handleSubmit(prev);
+        return prev;
+      });
+    }
+  }, [timerExpired]);
 
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
@@ -188,6 +245,12 @@ export default function AssignmentDetailScreen() {
       flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
     },
     mediaHint: { fontSize: 13, color: colors.mutedForeground, marginBottom: 10, lineHeight: 18 },
+    timerBanner: {
+      flexDirection: "row", alignItems: "center", gap: 8,
+      borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10,
+      marginBottom: 14, borderWidth: 1.5,
+    },
+    timerText: { fontSize: 22, fontWeight: "900", fontVariant: ["tabular-nums"] as any },
   });
 
   if (isLoading) {
@@ -196,14 +259,14 @@ export default function AssignmentDetailScreen() {
 
   if (fetchError || !assignment) {
     return (
-      <View style={[styles.container]}>
+      <View style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
             <Feather name="arrow-left" size={22} color={colors.foreground} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Задание</Text>
         </View>
-        <View style={[styles.loading]}>
+        <View style={styles.loading}>
           <Feather name="alert-circle" size={40} color={colors.destructive} />
           <Text style={{ marginTop: 12, fontSize: 15, color: colors.mutedForeground, textAlign: "center", paddingHorizontal: 40 }}>
             {fetchError ?? "Задание не найдено"}
@@ -227,8 +290,6 @@ export default function AssignmentDetailScreen() {
   }
 
   const typeColor = TYPE_COLORS[assignment.type] || colors.primary;
-
-  // ── Media helper ────────────────────────────────────────────────────
   const mediaUrl = assignment.mediaUrl || (assignment.type !== "reading" ? assignment.content : null);
   const textContent = assignment.type === "reading" ? assignment.content : null;
 
@@ -242,6 +303,13 @@ export default function AssignmentDetailScreen() {
     ? mediaUrl.replace("watch?v=", "embed/").replace("youtu.be/", "www.youtube.com/embed/")
     : null;
 
+  // Timer display helpers
+  const hasTimer = isStudent && !!assignment.timeLimitMinutes && !submitted;
+  const timerWarning = timeLeft !== null && timeLeft < 60;
+  const timerDanger = timeLeft !== null && timeLeft < 30;
+  const timerColor = timerDanger ? colors.destructive : timerWarning ? "#f59e0b" : colors.success;
+  const inputsDisabled = submitted || timerExpired;
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -249,9 +317,59 @@ export default function AssignmentDetailScreen() {
           <Feather name="arrow-left" size={22} color={colors.foreground} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{assignment.title}</Text>
+
+        {/* Timer badge in header */}
+        {hasTimer && timeLeft !== null && (
+          <View style={[styles.timerBanner, {
+            borderColor: timerColor + "60",
+            backgroundColor: timerColor + "12",
+            paddingHorizontal: 10, paddingVertical: 6,
+            marginBottom: 0,
+          }]}>
+            <Feather name="clock" size={16} color={timerColor} />
+            <Text style={[styles.timerText, { fontSize: 17, color: timerColor }]}>
+              {formatTime(timeLeft)}
+            </Text>
+          </View>
+        )}
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+
+        {/* Timer expired banner */}
+        {timerExpired && !submitted && (
+          <View style={{
+            backgroundColor: "#fef2f2", borderRadius: 14, padding: 14,
+            borderWidth: 1.5, borderColor: "#fca5a5", marginBottom: 16,
+            flexDirection: "row", alignItems: "center", gap: 10,
+          }}>
+            <Feather name="clock" size={20} color={colors.destructive} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 15, fontWeight: "800", color: colors.destructive }}>Время вышло!</Text>
+              <Text style={{ fontSize: 12, color: colors.destructive, marginTop: 2 }}>
+                Ответы отправляются автоматически…
+              </Text>
+            </View>
+            <ActivityIndicator color={colors.destructive} />
+          </View>
+        )}
+
+        {/* Timer running banner (shown inside scroll on mobile) */}
+        {hasTimer && timeLeft !== null && !timerExpired && Platform.OS !== "web" && (
+          <View style={[styles.timerBanner, {
+            borderColor: timerColor + "60",
+            backgroundColor: timerColor + "12",
+            marginBottom: 12,
+          }]}>
+            <Feather name="clock" size={20} color={timerColor} />
+            <Text style={{ fontSize: 14, color: timerColor, fontWeight: "700", flex: 1 }}>
+              Оставшееся время:
+            </Text>
+            <Text style={[styles.timerText, { color: timerColor }]}>
+              {formatTime(timeLeft)}
+            </Text>
+          </View>
+        )}
 
         {/* Info card */}
         <View style={styles.card}>
@@ -269,12 +387,24 @@ export default function AssignmentDetailScreen() {
               <Feather name="users" size={12} color={colors.mutedForeground} />
               <Text style={[styles.badgeText, { color: colors.mutedForeground }]}>{assignment.ageMin}–{assignment.ageMax} лет</Text>
             </View>
+            {assignment.timeLimitMinutes ? (
+              <View style={[styles.badge, { backgroundColor: "#f59e0b18" }]}>
+                <Feather name="clock" size={12} color="#92400e" />
+                <Text style={[styles.badgeText, { color: "#92400e" }]}>{assignment.timeLimitMinutes} мин</Text>
+              </View>
+            ) : null}
           </View>
         </View>
 
         {/* Result after submission */}
         {submitted && result && (
           <View style={[styles.resultCard, { borderColor: result.score >= 70 ? colors.success : colors.destructive }]}>
+            {timerExpired && (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                <Feather name="clock" size={14} color={colors.mutedForeground} />
+                <Text style={{ fontSize: 12, color: colors.mutedForeground }}>Время истекло — задание сдано автоматически</Text>
+              </View>
+            )}
             <Text style={[styles.resultScore, { color: result.score >= 70 ? colors.success : colors.destructive }]}>
               {result.score}%
             </Text>
@@ -356,8 +486,10 @@ export default function AssignmentDetailScreen() {
               const questionResult = result?.results?.find((r: any) => r.questionId === q.id);
               const hasOptions = Array.isArray(q.options) && q.options.length > 0;
               const selected = answers[q.id];
+              const isLocked = inputsDisabled;
+
               return (
-                <View key={q.id} style={styles.questionCard}>
+                <View key={q.id} style={[styles.questionCard, isLocked && !submitted && { opacity: 0.6 }]}>
                   <Text style={styles.questionText}>{i + 1}. {q.text}</Text>
 
                   {isTeacherRole && q.correctAnswer ? (
@@ -373,8 +505,8 @@ export default function AssignmentDetailScreen() {
                         return (
                           <TouchableOpacity
                             key={oi}
-                            onPress={() => !submitted && setAnswers(prev => ({ ...prev, [q.id]: opt }))}
-                            activeOpacity={submitted ? 1 : 0.7}
+                            onPress={() => !isLocked && setAnswers(prev => ({ ...prev, [q.id]: opt }))}
+                            activeOpacity={isLocked ? 1 : 0.7}
                             style={{
                               flexDirection: "row", alignItems: "center", gap: 10,
                               padding: 12, borderRadius: 12, borderWidth: 1.5,
@@ -424,10 +556,10 @@ export default function AssignmentDetailScreen() {
                           submitted && questionResult && !questionResult.isCorrect && styles.answerWrong,
                         ]}
                         value={answers[q.id] || ""}
-                        onChangeText={v => setAnswers(prev => ({ ...prev, [q.id]: v }))}
-                        placeholder="Ваш ответ..."
+                        onChangeText={v => !isLocked && setAnswers(prev => ({ ...prev, [q.id]: v }))}
+                        placeholder={isLocked && !submitted ? "Время вышло" : "Ваш ответ..."}
                         placeholderTextColor={colors.mutedForeground}
-                        editable={!submitted}
+                        editable={!isLocked}
                       />
                       {submitted && questionResult && (
                         questionResult.isCorrect
@@ -443,13 +575,21 @@ export default function AssignmentDetailScreen() {
         )}
 
         {/* Submit button */}
-        {!isTeacherRole && !submitted && (assignment.questions || []).length > 0 && (
-          <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit} disabled={submitting}>
+        {!isTeacherRole && !submitted && !timerExpired && (assignment.questions || []).length > 0 && (
+          <TouchableOpacity style={styles.submitBtn} onPress={() => handleSubmit()} disabled={submitting}>
             {submitting
               ? <ActivityIndicator color="#fff" />
               : <Text style={styles.submitText}>Отправить ответы</Text>
             }
           </TouchableOpacity>
+        )}
+
+        {/* Submitting spinner for auto-submit */}
+        {timerExpired && submitting && (
+          <View style={{ alignItems: "center", paddingVertical: 20, gap: 8 }}>
+            <ActivityIndicator color={colors.primary} size="large" />
+            <Text style={{ color: colors.mutedForeground, fontSize: 14 }}>Отправка результатов…</Text>
+          </View>
         )}
       </ScrollView>
     </View>

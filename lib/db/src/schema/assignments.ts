@@ -18,6 +18,7 @@ export const assignmentsTable = pgTable("assignments", {
   mediaUrl: text("media_url"),
   content: text("content"),
   isDraft: boolean("is_draft").notNull().default(true),
+  timeLimitMinutes: integer("time_limit_minutes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
