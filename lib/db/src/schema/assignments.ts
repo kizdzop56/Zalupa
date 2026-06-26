@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, timestamp, pgEnum, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, timestamp, pgEnum, jsonb, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -17,6 +17,7 @@ export const assignmentsTable = pgTable("assignments", {
   points: integer("points").notNull().default(10),
   mediaUrl: text("media_url"),
   content: text("content"),
+  isDraft: boolean("is_draft").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

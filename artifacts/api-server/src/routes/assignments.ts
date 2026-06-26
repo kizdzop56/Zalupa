@@ -1,25 +1,43 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { assignmentsTable, questionsTable, assignedTasksTable, submissionsTable, submissionAnswersTable, usersTable, teacherStudentsTable } from "@workspace/db";
-import { eq, and, gte, lte, inArray } from "drizzle-orm";
+import { eq, and, gte, lte, inArray, or } from "drizzle-orm";
 import { requireAuth, getUser, requireRole, isTeacher } from "../lib/auth";
 
 const router = Router();
 
-// ── List all assignments ──────────────────────────────────────────────
+// ── List assignments ──────────────────────────────────────────────────
+// Students: only published (isDraft=false), optionally filtered by age
+// Teachers/admins: their own (any status) + all published others
 router.get("/assignments", requireAuth, async (req, res) => {
   const { type, ageMin, ageMax } = req.query;
+  const caller = getUser(req);
 
-  const conditions: any[] = [];
-  if (type) conditions.push(eq(assignmentsTable.type, type as any));
-  if (ageMin) conditions.push(lte(assignmentsTable.ageMin, Number(ageMin)));
-  if (ageMax) conditions.push(gte(assignmentsTable.ageMax, Number(ageMax)));
+  let rows: typeof assignmentsTable.$inferSelect[];
 
-  const assignments = conditions.length > 0
-    ? await db.select().from(assignmentsTable).where(and(...conditions))
-    : await db.select().from(assignmentsTable);
+  if (isTeacher(caller.role) || caller.role === "admin") {
+    const all = await db.select().from(assignmentsTable);
+    rows = all.filter(a => !a.isDraft || a.createdBy === caller.userId);
+  } else {
+    rows = await db.select().from(assignmentsTable).where(eq(assignmentsTable.isDraft, false));
+  }
 
-  res.json(assignments);
+  if (type) rows = rows.filter(a => a.type === type);
+  if (ageMin) rows = rows.filter(a => a.ageMin <= Number(ageMin));
+  if (ageMax) rows = rows.filter(a => a.ageMax >= Number(ageMax));
+
+  res.json(rows);
+});
+
+// ── Teacher: my assignments (drafts + published) ──────────────────────
+router.get("/assignments/my-assignments", requireAuth, async (req, res) => {
+  const caller = getUser(req);
+  if (!isTeacher(caller.role) && caller.role !== "admin") {
+    res.status(403).json({ error: "Forbidden" }); return;
+  }
+  const rows = await db.select().from(assignmentsTable)
+    .where(eq(assignmentsTable.createdBy, caller.userId));
+  res.json(rows);
 });
 
 // ── Assignments assigned to me (student) ─────────────────────────────
@@ -72,29 +90,27 @@ router.get("/assignments/teacher-results", requireAuth, async (req, res) => {
     .leftJoin(usersTable, eq(assignedTasksTable.studentId, usersTable.id))
     .where(eq(assignedTasksTable.teacherId, caller.userId));
 
-  // For each task, find if the student has submitted it
   const withSubmissions = await Promise.all(tasks.map(async (task) => {
     const [submission] = await db.select({
       id: submissionsTable.id,
       score: submissionsTable.score,
       correctCount: submissionsTable.correctCount,
       totalQuestions: submissionsTable.totalQuestions,
-      pointsEarned: submissionsTable.pointsEarned,
       submittedAt: submissionsTable.submittedAt,
-    })
-      .from(submissionsTable)
+    }).from(submissionsTable)
       .where(and(
         eq(submissionsTable.studentId, task.studentId!),
         eq(submissionsTable.assignmentId, task.assignmentId!),
-      ))
-      .orderBy(submissionsTable.submittedAt)
-      .limit(1);
+      ));
 
     let answers: any[] = [];
     if (submission) {
-      answers = await db.select()
-        .from(submissionAnswersTable)
-        .where(eq(submissionAnswersTable.submissionId, submission.id));
+      answers = await db.select({
+        questionId: submissionAnswersTable.questionId,
+        answer: submissionAnswersTable.studentAnswer,
+        isCorrect: submissionAnswersTable.isCorrect,
+        correctAnswer: submissionAnswersTable.correctAnswer,
+      }).from(submissionAnswersTable).where(eq(submissionAnswersTable.submissionId, submission.id));
     }
 
     return { ...task, submission: submission ?? null, answers };
@@ -110,19 +126,24 @@ router.post("/assignments", requireAuth, async (req, res) => {
     res.status(403).json({ error: "Forbidden" }); return;
   }
 
-  const { title, description, type, ageMin, ageMax, points, mediaUrl, content, questions } = req.body;
+  const { title, description, type, ageMin, ageMax, points, mediaUrl, content, questions, isDraft } = req.body;
+
+  if (!title?.trim()) { res.status(400).json({ error: "Введите название задания" }); return; }
+  if (!description?.trim()) { res.status(400).json({ error: "Введите описание задания" }); return; }
+  if (!type) { res.status(400).json({ error: "Выберите тип задания" }); return; }
 
   const [assignment] = await db.insert(assignmentsTable).values({
-    title,
-    description,
+    title: title.trim(),
+    description: description.trim(),
     type,
     source: "teacher_created",
     createdBy: caller.userId,
     ageMin: ageMin || 5,
     ageMax: ageMax || 18,
     points: points || 10,
-    mediaUrl,
-    content,
+    mediaUrl: mediaUrl?.trim() || null,
+    content: content?.trim() || null,
+    isDraft: isDraft !== false,
   }).returning();
 
   if (questions && questions.length > 0) {
@@ -130,8 +151,8 @@ router.post("/assignments", requireAuth, async (req, res) => {
       questions.map((q: any, i: number) => ({
         assignmentId: assignment.id,
         text: q.text,
-        options: q.options,
-        correctAnswer: q.correctAnswer,
+        options: q.options ?? [],
+        correctAnswer: q.correctAnswer ?? "",
         orderIndex: q.orderIndex ?? i,
       }))
     );
@@ -166,8 +187,22 @@ router.get("/assignments/:id", requireAuth, async (req, res) => {
       correctAnswer: canSeeAnswers ? q.correctAnswer : null,
       orderIndex: q.orderIndex,
     })),
-    content: assignment.content,
   });
+});
+
+// ── Publish a draft assignment ────────────────────────────────────────
+router.post("/assignments/:id/publish", requireAuth, async (req, res) => {
+  const caller = getUser(req);
+  if (!isTeacher(caller.role) && caller.role !== "admin") {
+    res.status(403).json({ error: "Forbidden" }); return;
+  }
+  const id = Number(req.params["id"]);
+  const [updated] = await db.update(assignmentsTable)
+    .set({ isDraft: false, updatedAt: new Date() })
+    .where(and(eq(assignmentsTable.id, id), eq(assignmentsTable.createdBy, caller.userId)))
+    .returning();
+  if (!updated) { res.status(404).json({ error: "Not found" }); return; }
+  res.json(updated);
 });
 
 // ── Assign assignment to students (teacher) ───────────────────────────
@@ -182,11 +217,17 @@ router.post("/assignments/:id/assign", requireAuth, async (req, res) => {
     res.status(400).json({ error: "studentIds required" }); return;
   }
 
-  const [assignment] = await db.select({ id: assignmentsTable.id })
-    .from(assignmentsTable).where(eq(assignmentsTable.id, assignmentId));
+  const [assignment] = await db.select().from(assignmentsTable)
+    .where(eq(assignmentsTable.id, assignmentId));
   if (!assignment) { res.status(404).json({ error: "Assignment not found" }); return; }
 
-  // Verify teacher has accepted connection with each student
+  // Auto-publish when assigning
+  if (assignment.isDraft) {
+    await db.update(assignmentsTable)
+      .set({ isDraft: false, updatedAt: new Date() })
+      .where(eq(assignmentsTable.id, assignmentId));
+  }
+
   const accepted = await db.select({ studentId: teacherStudentsTable.studentId })
     .from(teacherStudentsTable)
     .where(and(
@@ -200,7 +241,6 @@ router.post("/assignments/:id/assign", requireAuth, async (req, res) => {
     res.status(400).json({ error: "Нет принятых учеников из списка" }); return;
   }
 
-  // Remove existing assignments to avoid duplicates
   await db.delete(assignedTasksTable).where(and(
     eq(assignedTasksTable.assignmentId, assignmentId),
     eq(assignedTasksTable.teacherId, caller.userId),
@@ -218,7 +258,7 @@ router.post("/assignments/:id/assign", requireAuth, async (req, res) => {
   res.json({ ok: true, assigned: validStudentIds.length });
 });
 
-// ── Patch / delete assignment (teacher or admin who owns it) ──────────
+// ── Patch assignment (teacher or admin who owns it) ───────────────────
 router.patch("/assignments/:id", requireAuth, async (req, res) => {
   const caller = getUser(req);
   if (!isTeacher(caller.role) && caller.role !== "admin") {
@@ -226,12 +266,39 @@ router.patch("/assignments/:id", requireAuth, async (req, res) => {
   }
 
   const id = Number(req.params["id"]);
-  const { title, description, ageMin, ageMax, points, mediaUrl, content } = req.body;
+  const { title, description, ageMin, ageMax, points, mediaUrl, content, type, questions } = req.body;
 
   const [updated] = await db.update(assignmentsTable)
-    .set({ title, description, ageMin, ageMax, points, mediaUrl, content, updatedAt: new Date() })
-    .where(eq(assignmentsTable.id, id))
+    .set({
+      ...(title !== undefined && { title }),
+      ...(description !== undefined && { description }),
+      ...(ageMin !== undefined && { ageMin }),
+      ...(ageMax !== undefined && { ageMax }),
+      ...(points !== undefined && { points }),
+      ...(mediaUrl !== undefined && { mediaUrl }),
+      ...(content !== undefined && { content }),
+      ...(type !== undefined && { type }),
+      updatedAt: new Date(),
+    })
+    .where(and(eq(assignmentsTable.id, id), eq(assignmentsTable.createdBy, caller.userId)))
     .returning();
+
+  if (!updated) { res.status(404).json({ error: "Not found" }); return; }
+
+  if (questions !== undefined) {
+    await db.delete(questionsTable).where(eq(questionsTable.assignmentId, id));
+    if (questions.length > 0) {
+      await db.insert(questionsTable).values(
+        questions.map((q: any, i: number) => ({
+          assignmentId: id,
+          text: q.text,
+          options: q.options ?? [],
+          correctAnswer: q.correctAnswer ?? "",
+          orderIndex: i,
+        }))
+      );
+    }
+  }
 
   res.json(updated);
 });
@@ -241,7 +308,10 @@ router.delete("/assignments/:id", requireAuth, async (req, res) => {
   if (!isTeacher(caller.role) && caller.role !== "admin") {
     res.status(403).json({ error: "Forbidden" }); return;
   }
-  await db.delete(assignmentsTable).where(eq(assignmentsTable.id, Number(req.params["id"])));
+  await db.delete(assignmentsTable).where(and(
+    eq(assignmentsTable.id, Number(req.params["id"])),
+    eq(assignmentsTable.createdBy, caller.userId),
+  ));
   res.status(204).send();
 });
 

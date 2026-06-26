@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { usersTable, submissionsTable, timeSessionsTable, assignmentsTable } from "@workspace/db";
-import { eq, and, sql, desc } from "drizzle-orm";
+import { eq, and, sql, desc, isNull } from "drizzle-orm";
 import { requireAuth, getUser, isTeacher } from "../lib/auth";
 
 const router = Router();
@@ -43,11 +43,14 @@ router.get("/users/:id", requireAuth, async (req, res) => {
   let averageScore: number | null = null;
 
   if (user.role === "student") {
-    // Add current session time from DB
-    const timeSessions = await db.select({ duration: timeSessionsTable.durationMinutes })
-      .from(timeSessionsTable).where(eq(timeSessionsTable.studentId, id));
-    const sessionMinutes = timeSessions.reduce((sum, s) => sum + (s.duration || 0), 0);
-    totalTimeMinutes = (user.totalTimeMinutes ?? 0) + sessionMinutes;
+    // Add only the CURRENT open session (closed sessions are already in user.totalTimeMinutes)
+    const [openSession] = await db.select()
+      .from(timeSessionsTable)
+      .where(and(eq(timeSessionsTable.studentId, id), isNull(timeSessionsTable.endedAt)));
+    const openMinutes = openSession
+      ? Math.floor((Date.now() - openSession.startedAt.getTime()) / 60000)
+      : 0;
+    totalTimeMinutes = (user.totalTimeMinutes ?? 0) + openMinutes;
 
     const submissions = await db.select({ score: submissionsTable.score })
       .from(submissionsTable).where(eq(submissionsTable.studentId, id));

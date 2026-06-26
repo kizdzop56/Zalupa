@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Platform, Alert, TextInput,
+  ActivityIndicator, Platform, Alert, TextInput, Linking,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
@@ -141,7 +141,7 @@ export default function AssignmentDetailScreen() {
   if (!assignment) {
     return (
       <View style={[styles.container, styles.loading]}>
-        <Text style={{ color: colors.mutedForeground }}>Assignment not found</Text>
+        <Text style={{ color: colors.mutedForeground }}>Задание не найдено</Text>
       </View>
     );
   }
@@ -177,13 +177,93 @@ export default function AssignmentDetailScreen() {
           </View>
         </View>
 
-        {/* Content (reading/audio/video) */}
-        {assignment.content && (
+        {/* Content: Reading text */}
+        {assignment.content && assignment.type === "reading" && (
           <View style={styles.content}>
-            <Text style={[styles.sectionTitle, { marginBottom: 8 }]}>
-              {assignment.type === "reading" ? "Reading Passage" : assignment.type === "audio" ? "Audio" : "Video"}
-            </Text>
+            <Text style={[styles.sectionTitle, { marginBottom: 8 }]}>Текст для чтения</Text>
             <Text style={styles.contentText}>{assignment.content}</Text>
+          </View>
+        )}
+
+        {/* Content: Video player */}
+        {assignment.type === "video" && (assignment.content || assignment.mediaUrl) && (
+          <View style={[styles.content, { gap: 10 }]}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: "#f59e0b20", justifyContent: "center", alignItems: "center" }}>
+                <Feather name="video" size={17} color="#f59e0b" />
+              </View>
+              <Text style={styles.sectionTitle}>Видео</Text>
+            </View>
+            {!isTeacherRole && (
+              <Text style={{ fontSize: 13, color: colors.mutedForeground, marginBottom: 6 }}>
+                📺 Сначала посмотрите видео, затем ответьте на вопросы ниже
+              </Text>
+            )}
+            <TouchableOpacity
+              style={{
+                backgroundColor: "#f59e0b", borderRadius: 12,
+                paddingVertical: 12, paddingHorizontal: 16,
+                flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+              }}
+              onPress={() => {
+                const url = assignment.mediaUrl || assignment.content;
+                if (url) Linking.openURL(url.startsWith("http") ? url : `https://${url}`);
+              }}
+            >
+              <Feather name="play-circle" size={18} color="#fff" />
+              <Text style={{ fontSize: 15, fontWeight: "700", color: "#fff" }}>Открыть видео</Text>
+            </TouchableOpacity>
+            {assignment.content && assignment.content.startsWith("http") && Platform.OS === "web" && (
+              <View style={{ borderRadius: 12, overflow: "hidden", marginTop: 6 }}>
+                <iframe
+                  src={assignment.content.includes("youtube.com/watch")
+                    ? assignment.content.replace("watch?v=", "embed/")
+                    : assignment.content}
+                  style={{ width: "100%", height: 240, border: "none" }}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                />
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Content: Audio player */}
+        {assignment.type === "audio" && (assignment.content || assignment.mediaUrl) && (
+          <View style={[styles.content, { gap: 10 }]}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: "#06b6d420", justifyContent: "center", alignItems: "center" }}>
+                <Feather name="headphones" size={17} color="#06b6d4" />
+              </View>
+              <Text style={styles.sectionTitle}>Аудио</Text>
+            </View>
+            {!isTeacherRole && (
+              <Text style={{ fontSize: 13, color: colors.mutedForeground, marginBottom: 6 }}>
+                🎧 Сначала прослушайте аудио, затем ответьте на вопросы ниже
+              </Text>
+            )}
+            {Platform.OS === "web" && (assignment.content || assignment.mediaUrl) ? (
+              <audio
+                controls
+                src={assignment.content || assignment.mediaUrl || ""}
+                style={{ width: "100%", borderRadius: 8 }}
+              />
+            ) : (
+              <TouchableOpacity
+                style={{
+                  backgroundColor: "#06b6d4", borderRadius: 12,
+                  paddingVertical: 12, paddingHorizontal: 16,
+                  flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+                }}
+                onPress={() => {
+                  const url = assignment.mediaUrl || assignment.content;
+                  if (url) Linking.openURL(url.startsWith("http") ? url : `https://${url}`);
+                }}
+              >
+                <Feather name="headphones" size={18} color="#fff" />
+                <Text style={{ fontSize: 15, fontWeight: "700", color: "#fff" }}>Открыть аудио</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
@@ -193,10 +273,10 @@ export default function AssignmentDetailScreen() {
             <Text style={[styles.resultScore, { color: result.score >= 70 ? colors.success : colors.destructive }]}>
               {result.score}%
             </Text>
-            <Text style={styles.resultLabel}>{result.correctCount}/{result.totalQuestions} correct</Text>
+            <Text style={styles.resultLabel}>{result.correctCount}/{result.totalQuestions} правильно</Text>
             <View style={styles.resultPoints}>
               <Feather name="star" size={16} color="#92400e" />
-              <Text style={styles.resultPointsText}>+{result.pointsEarned} points earned!</Text>
+              <Text style={styles.resultPointsText}>+{result.pointsEarned} очков!</Text>
             </View>
           </View>
         )}
@@ -319,7 +399,7 @@ export default function AssignmentDetailScreen() {
           <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit} disabled={submitting}>
             {submitting
               ? <ActivityIndicator color="#fff" />
-              : <Text style={styles.submitText}>Submit Answers</Text>
+              : <Text style={styles.submitText}>Отправить ответы</Text>
             }
           </TouchableOpacity>
         )}

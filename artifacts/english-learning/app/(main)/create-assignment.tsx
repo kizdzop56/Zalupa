@@ -172,7 +172,7 @@ export default function CreateAssignmentScreen() {
     },
     backBtn: { width: 36, height: 36, justifyContent: "center", alignItems: "center" },
     headerTitle: { fontSize: 20, fontWeight: "800", color: colors.foreground, flex: 1 },
-    scroll: { paddingHorizontal: 20, paddingBottom: insets.bottom + 40 },
+    scroll: { paddingHorizontal: 20, paddingBottom: insets.bottom + 140 },
     section: { marginBottom: 20 },
     sectionTitle: {
       fontSize: 12, fontWeight: "700", color: colors.mutedForeground,
@@ -485,7 +485,7 @@ export default function CreateAssignmentScreen() {
             ? <ActivityIndicator color="#fff" />
             : <>
                 <Feather name="check" size={18} color="#fff" />
-                <Text style={s.submitText}>{success ? "Готово!" : "Создать задание"}</Text>
+                <Text style={s.submitText}>{success ? "Готово!" : "Сохранить черновик"}</Text>
               </>
           }
         </TouchableOpacity>

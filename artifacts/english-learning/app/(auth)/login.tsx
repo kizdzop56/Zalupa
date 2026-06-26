@@ -74,7 +74,7 @@ export default function LoginScreen() {
       borderRadius: 13, flexDirection: "row", alignItems: "center",
       paddingHorizontal: 14, marginBottom: 14,
     },
-    input: { flex: 1, fontSize: 15, color: colors.foreground, paddingVertical: 14 },
+    input: { flex: 1, fontSize: 15, color: colors.foreground, paddingVertical: 14, ...(Platform.OS === "web" ? { outlineWidth: 0 } as any : {}) },
     eyeBtn: { padding: 6 },
     error: { fontSize: 14, color: colors.destructive, textAlign: "center", marginBottom: 12 },
     button: {

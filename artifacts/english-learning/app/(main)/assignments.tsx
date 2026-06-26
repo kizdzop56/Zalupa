@@ -208,6 +208,8 @@ export default function AssignmentsScreen() {
   const [assignTarget, setAssignTarget] = useState<Assignment | null>(null);
   const [myTasks, setMyTasks] = useState<any[]>([]);
   const [loadingMyTasks, setLoadingMyTasks] = useState(false);
+  const [myAssignments, setMyAssignments] = useState<any[]>([]);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const isTeacher = isTeacherOrAdmin(user?.role ?? "");
   const isStudent = user?.role === "student";
@@ -224,7 +226,26 @@ export default function AssignmentsScreen() {
     finally { setLoadingMyTasks(false); }
   }, [isStudent]);
 
+  const loadMyAssignments = useCallback(async () => {
+    if (!isTeacher) return;
+    try { setMyAssignments(await apiFetch("/api/assignments/my-assignments")); }
+    catch { /* silent */ }
+  }, [isTeacher]);
+
   useEffect(() => { loadMyTasks(); }, [loadMyTasks]);
+  useEffect(() => { loadMyAssignments(); }, [loadMyAssignments]);
+
+  const handleDeleteAssignment = async (id: number) => {
+    setDeletingId(id);
+    try {
+      await apiFetch(`/api/assignments/${id}`, { method: "DELETE" });
+      setMyAssignments(prev => prev.filter(a => a.id !== id));
+    } catch (e: any) {
+      Alert.alert("Ошибка", e.message);
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const assignments = (allAssignments ?? []).filter(
     (a) => filter === "Все" || a.type === filter
@@ -382,13 +403,72 @@ export default function AssignmentsScreen() {
     );
   };
 
+  const renderMyAssignmentCard = (item: any) => {
+    const color = TYPE_COLORS[item.type] || colors.primary;
+    const isDraft = item.isDraft;
+    return (
+      <TouchableOpacity
+        key={item.id}
+        style={[styles.card, isDraft && { borderColor: colors.border, borderStyle: "dashed" }]}
+        onPress={() => router.push(`/(main)/assignment/${item.id}` as any)}
+        activeOpacity={0.75}
+      >
+        <View style={styles.cardHeader}>
+          <View style={[styles.typeIcon, { backgroundColor: color + "20" }]}>
+            <Feather name={TYPE_ICONS[item.type]} size={22} color={color} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
+            {isDraft && (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 }}>
+                <Feather name="edit-2" size={11} color={colors.mutedForeground} />
+                <Text style={{ fontSize: 11, color: colors.mutedForeground, fontWeight: "600" }}>Черновик</Text>
+              </View>
+            )}
+          </View>
+        </View>
+        <View style={styles.cardActions}>
+          <TouchableOpacity
+            style={[styles.actionBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "10", flex: undefined, paddingHorizontal: 12 }]}
+            onPress={(e) => { e.stopPropagation(); setAssignTarget(item); }}
+          >
+            <Feather name="send" size={14} color={colors.primary} />
+            <Text style={[styles.actionBtnText, { color: colors.primary }]}>Назначить</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionBtn, { borderColor: colors.border, backgroundColor: colors.card, flex: undefined, paddingHorizontal: 12 }]}
+            onPress={(e) => { e.stopPropagation(); router.push(`/(main)/teacher-results/${item.id}` as any); }}
+          >
+            <Feather name="bar-chart-2" size={14} color={colors.mutedForeground} />
+            <Text style={[styles.actionBtnText, { color: colors.mutedForeground }]}>Итоги</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.actionBtn, { borderColor: "#fca5a5", backgroundColor: "#fef2f2", flex: undefined, paddingHorizontal: 12 }]}
+            onPress={(e) => {
+              e.stopPropagation();
+              Alert.alert("Удалить задание?", item.title, [
+                { text: "Отмена", style: "cancel" },
+                { text: "Удалить", style: "destructive", onPress: () => handleDeleteAssignment(item.id) },
+              ]);
+            }}
+          >
+            {deletingId === item.id
+              ? <ActivityIndicator size="small" color="#dc2626" />
+              : <Feather name="trash-2" size={14} color="#dc2626" />
+            }
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
   return (
     <View style={styles.container}>
       <AssignModal
         visible={!!assignTarget}
         assignment={assignTarget}
         onClose={() => setAssignTarget(null)}
-        onDone={() => Alert.alert("Готово!", "Задание отправлено ученикам")}
+        onDone={() => { loadMyAssignments(); refetch(); }}
       />
 
       <View style={styles.header}>
@@ -439,19 +519,30 @@ export default function AssignmentsScreen() {
           keyExtractor={(a) => String(a.id)}
           renderItem={renderAssignmentCard}
           contentContainerStyle={[styles.list, { paddingTop: 8 }]}
-          refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={() => { refetch(); loadMyTasks(); }} />}
+          refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={() => { refetch(); loadMyTasks(); loadMyAssignments(); }} />}
           ListHeaderComponent={
-            isStudent && myTasks.length > 0 ? (
-              <View style={{ marginBottom: 8 }}>
-                <Text style={styles.sectionLabel}>Назначено учителем · {myTasks.length}</Text>
-                {myTasks.map((item) => (
-                  <View key={item.assignedTaskId}>
-                    {renderMyTaskCard({ item })}
-                  </View>
-                ))}
-                <Text style={[styles.sectionLabel, { marginTop: 16 }]}>Все задания</Text>
-              </View>
-            ) : null
+            <>
+              {/* Teacher: my assignments section */}
+              {isTeacher && myAssignments.length > 0 && (
+                <View style={{ marginBottom: 8 }}>
+                  <Text style={styles.sectionLabel}>Мои задания · {myAssignments.length}</Text>
+                  {myAssignments.map((item) => renderMyAssignmentCard(item))}
+                  <Text style={[styles.sectionLabel, { marginTop: 16 }]}>Все задания</Text>
+                </View>
+              )}
+              {/* Student: assigned by teacher section */}
+              {isStudent && myTasks.length > 0 && (
+                <View style={{ marginBottom: 8 }}>
+                  <Text style={styles.sectionLabel}>Назначено учителем · {myTasks.length}</Text>
+                  {myTasks.map((item) => (
+                    <View key={item.assignedTaskId}>
+                      {renderMyTaskCard({ item })}
+                    </View>
+                  ))}
+                  <Text style={[styles.sectionLabel, { marginTop: 16 }]}>Все задания</Text>
+                </View>
+              )}
+            </>
           }
           ListEmptyComponent={
             <View style={styles.empty}>
