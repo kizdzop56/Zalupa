@@ -8,6 +8,7 @@ import voiceChatRouter from "./voiceChat";
 import timeTrackingRouter from "./timeTracking";
 import leaderboardRouter from "./leaderboard";
 import uploadRouter from "./upload";
+import connectionsRouter from "./connections";
 
 const router: IRouter = Router();
 
@@ -20,5 +21,6 @@ router.use(voiceChatRouter);
 router.use(timeTrackingRouter);
 router.use(leaderboardRouter);
 router.use(uploadRouter);
+router.use(connectionsRouter);
 
 export default router;

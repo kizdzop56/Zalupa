@@ -22,6 +22,7 @@ export interface AuthUser {
   avatarEmoji?: string;
   avatarColor?: string;
   bio?: string;
+  inviteCode?: string;
   createdAt: string;
 }
 

@@ -23,6 +23,8 @@ export const usersTable = pgTable("users", {
   knowledgeLevel: knowledgeLevelEnum("knowledge_level"),
   parentId: integer("parent_id"),
   totalPoints: integer("total_points").notNull().default(0),
+  // Unique invite code (6 chars, e.g. "A3X9K2")
+  inviteCode: text("invite_code").unique(),
   // Profile extras
   bio: text("bio"),
   avatarEmoji: text("avatar_emoji").default("🦁"),

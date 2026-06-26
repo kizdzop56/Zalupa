@@ -5,6 +5,7 @@ import { usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { generateToken, requireAuth, getUser } from "../lib/auth";
 import { calculateAge, getKnowledgeLevel } from "../lib/knowledgeLevel";
+import { generateInviteCode } from "../lib/inviteCode";
 
 const router = Router();
 
@@ -17,6 +18,11 @@ const PUBLIC_USER_FIELDS = (u: typeof usersTable.$inferSelect) => ({
   dateOfBirth: u.dateOfBirth,
   knowledgeLevel: u.knowledgeLevel,
   totalPoints: u.totalPoints,
+  totalTimeMinutes: u.totalTimeMinutes,
+  avatarEmoji: u.avatarEmoji,
+  avatarColor: u.avatarColor,
+  bio: u.bio,
+  inviteCode: u.inviteCode,
   createdAt: u.createdAt,
 });
 
@@ -37,6 +43,21 @@ router.post("/auth/login", async (req, res) => {
   if (!valid) {
     res.status(401).json({ error: "Invalid credentials" });
     return;
+  }
+
+  // Backfill invite code if missing (for existing users)
+  if (!user.inviteCode) {
+    let code = generateInviteCode();
+    let attempts = 0;
+    while (attempts < 10) {
+      const [clash] = await db.select({ id: usersTable.id })
+        .from(usersTable).where(eq(usersTable.inviteCode, code));
+      if (!clash) break;
+      code = generateInviteCode();
+      attempts++;
+    }
+    await db.update(usersTable).set({ inviteCode: code }).where(eq(usersTable.id, user.id));
+    user.inviteCode = code;
   }
 
   const token = generateToken({ userId: user.id, role: user.role });
@@ -78,9 +99,18 @@ router.post("/auth/register", async (req, res) => {
     return;
   }
 
-  const passwordHash = await bcrypt.hash(password, 12);
+  // Generate unique invite code
+  let inviteCode = generateInviteCode();
+  let attempts = 0;
+  while (attempts < 10) {
+    const [clash] = await db.select({ id: usersTable.id })
+      .from(usersTable).where(eq(usersTable.inviteCode, inviteCode));
+    if (!clash) break;
+    inviteCode = generateInviteCode();
+    attempts++;
+  }
 
-  // Map "teacher" to the "teacher" role in DB
+  const passwordHash = await bcrypt.hash(password, 12);
   const dbRole = role as "student" | "parent" | "teacher";
 
   const [user] = await db.insert(usersTable).values({
@@ -93,6 +123,7 @@ router.post("/auth/register", async (req, res) => {
     knowledgeLevel: knowledgeLevel as any ?? null,
     parentId: role === "student" && parentId ? parentId : null,
     totalPoints: 0,
+    inviteCode,
   }).returning();
 
   const token = generateToken({ userId: user.id, role: user.role });
