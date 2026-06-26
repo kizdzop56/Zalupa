@@ -206,11 +206,16 @@ export default function AssignmentsScreen() {
   const insets = useSafeAreaInsets();
   const [filter, setFilter] = useState<Filter>("Все");
   const [search, setSearch] = useState("");
+  const [viewMode, setViewMode] = useState<"tasks" | "results">("tasks");
   const [assignTarget, setAssignTarget] = useState<Assignment | null>(null);
   const [myTasks, setMyTasks] = useState<any[]>([]);
   const [loadingMyTasks, setLoadingMyTasks] = useState(false);
   const [myAssignments, setMyAssignments] = useState<any[]>([]);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [teacherSubs, setTeacherSubs] = useState<any[]>([]);
+  const [loadingTeacherSubs, setLoadingTeacherSubs] = useState(false);
+  const [myCompleted, setMyCompleted] = useState<any[]>([]);
+  const [loadingCompleted, setLoadingCompleted] = useState(false);
 
   const isTeacher = isTeacherOrAdmin(user?.role ?? "");
   const isStudent = user?.role === "student";
@@ -233,15 +238,35 @@ export default function AssignmentsScreen() {
     catch { /* silent */ }
   }, [isTeacher]);
 
+  const loadTeacherSubs = useCallback(async () => {
+    if (!isTeacher) return;
+    setLoadingTeacherSubs(true);
+    try { setTeacherSubs(await apiFetch("/api/assignments/teacher-results")); }
+    catch { /* silent */ }
+    finally { setLoadingTeacherSubs(false); }
+  }, [isTeacher]);
+
+  const loadMyCompleted = useCallback(async () => {
+    if (!isStudent) return;
+    setLoadingCompleted(true);
+    try { setMyCompleted(await apiFetch("/api/assignments/my-submissions")); }
+    catch { /* silent */ }
+    finally { setLoadingCompleted(false); }
+  }, [isStudent]);
+
   useEffect(() => { loadMyTasks(); }, [loadMyTasks]);
   useEffect(() => { loadMyAssignments(); }, [loadMyAssignments]);
+  useEffect(() => { loadTeacherSubs(); }, [loadTeacherSubs]);
+  useEffect(() => { loadMyCompleted(); }, [loadMyCompleted]);
 
-  // Refresh list when navigating back from create-assignment
+  // Refresh all data when screen comes into focus
   useFocusEffect(useCallback(() => {
     refetch();
     loadMyTasks();
     loadMyAssignments();
-  }, [refetch, loadMyTasks, loadMyAssignments]));
+    loadTeacherSubs();
+    loadMyCompleted();
+  }, [refetch, loadMyTasks, loadMyAssignments, loadTeacherSubs, loadMyCompleted]));
 
   const handleDeleteAssignment = async (id: number) => {
     setDeletingId(id);
@@ -339,6 +364,25 @@ export default function AssignmentsScreen() {
       flexDirection: "row", alignItems: "center", gap: 4,
       backgroundColor: colors.primary + "15", borderRadius: 8,
       paddingHorizontal: 8, paddingVertical: 3, marginBottom: 8, alignSelf: "flex-start",
+    },
+    modeToggle: {
+      flexDirection: "row", backgroundColor: colors.muted,
+      borderRadius: 14, padding: 3, marginTop: 10,
+    },
+    modeBtn: {
+      flex: 1, paddingVertical: 8, borderRadius: 12,
+      alignItems: "center", justifyContent: "center",
+    },
+    modeBtnActive: { backgroundColor: colors.background, shadowColor: "#000", shadowOpacity: 0.08, shadowRadius: 4, elevation: 2 },
+    modeBtnText: { fontSize: 13, fontWeight: "600", color: colors.mutedForeground },
+    modeBtnTextActive: { color: colors.foreground },
+    subCard: {
+      backgroundColor: colors.card, borderRadius: 16, padding: 14,
+      marginBottom: 10, borderWidth: 1, borderColor: colors.border,
+    },
+    scoreBadge: {
+      paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10,
+      alignSelf: "flex-start",
     },
   });
 
@@ -482,6 +526,72 @@ export default function AssignmentsScreen() {
     );
   };
 
+  // ── Teacher: render one student submission card ──────────────────────
+  const renderTeacherSubCard = (item: any) => {
+    const color = TYPE_COLORS[item.assignmentType] || colors.primary;
+    const hasSub = !!item.submission;
+    if (!hasSub) return null;
+    const score = item.submission.score;
+    const scoreColor = score >= 70 ? colors.success : score >= 40 ? "#f59e0b" : colors.destructive;
+    return (
+      <View key={`${item.assignedTaskId}`} style={styles.subCard}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 }}>
+          <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: (item.studentAvatarColor ?? "#6366f1"), justifyContent: "center", alignItems: "center" }}>
+            <Text style={{ fontSize: 18 }}>{item.studentAvatarEmoji ?? "🦁"}</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 14, fontWeight: "700", color: colors.foreground }}>{item.studentName}</Text>
+            <Text style={{ fontSize: 12, color: colors.mutedForeground }} numberOfLines={1}>{item.assignmentTitle}</Text>
+          </View>
+          <View style={[styles.scoreBadge, { backgroundColor: scoreColor + "18" }]}>
+            <Text style={{ fontSize: 16, fontWeight: "900", color: scoreColor }}>{score}%</Text>
+          </View>
+        </View>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <View style={[styles.typeBadge, { backgroundColor: color + "15" }]}>
+            <Text style={[styles.typeBadgeText, { color }]}>{TYPE_LABELS[item.assignmentType] ?? item.assignmentType}</Text>
+          </View>
+          <Text style={styles.ageText}>
+            {item.submission.correctCount}/{item.submission.totalQuestions} правильно
+          </Text>
+          <Text style={styles.ageText}>
+            {new Date(item.submission.submittedAt).toLocaleDateString("ru-RU")}
+          </Text>
+        </View>
+      </View>
+    );
+  };
+
+  // ── Student: render one completed assignment card ─────────────────────
+  const renderCompletedCard = (item: any) => {
+    const color = TYPE_COLORS[item.type] || colors.primary;
+    const scoreColor = item.score >= 70 ? colors.success : item.score >= 40 ? "#f59e0b" : colors.destructive;
+    return (
+      <View key={`${item.submissionId}`} style={styles.subCard}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 }}>
+          <View style={[styles.typeIcon, { backgroundColor: color + "20" }]}>
+            <Feather name={TYPE_ICONS[item.type] ?? "edit-3"} size={20} color={color} />
+          </View>
+          <Text style={[styles.cardTitle, { flex: 1 }]} numberOfLines={2}>{item.title}</Text>
+          <View style={[styles.scoreBadge, { backgroundColor: scoreColor + "18" }]}>
+            <Text style={{ fontSize: 16, fontWeight: "900", color: scoreColor }}>{item.score}%</Text>
+          </View>
+        </View>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <View style={[styles.typeBadge, { backgroundColor: color + "15" }]}>
+            <Text style={[styles.typeBadgeText, { color }]}>{TYPE_LABELS[item.type] ?? item.type}</Text>
+          </View>
+          <Text style={styles.ageText}>{item.correctCount}/{item.totalQuestions} правильно</Text>
+          <View style={styles.pointsBadge}>
+            <Feather name="star" size={12} color="#92400e" />
+            <Text style={styles.pointsText}>+{item.pointsEarned} очков</Text>
+          </View>
+          <Text style={styles.ageText}>{new Date(item.submittedAt).toLocaleDateString("ru-RU")}</Text>
+        </View>
+      </View>
+    );
+  };
+
   return (
     <View style={styles.container}>
       <AssignModal
@@ -512,98 +622,164 @@ export default function AssignmentsScreen() {
           </View>
         )}
 
-        {/* Search bar */}
-        <View style={styles.searchBox}>
-          <Feather name="search" size={16} color={colors.mutedForeground} />
-          <TextInput
-            style={styles.searchInput}
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Поиск по названию..."
-            placeholderTextColor={colors.mutedForeground}
-            returnKeyType="search"
-            clearButtonMode="while-editing"
-          />
-          {search.length > 0 && (
-            <TouchableOpacity onPress={() => setSearch("")}>
-              <Feather name="x" size={16} color={colors.mutedForeground} />
-            </TouchableOpacity>
-          )}
+        {/* Mode toggle */}
+        <View style={styles.modeToggle}>
+          <TouchableOpacity
+            style={[styles.modeBtn, viewMode === "tasks" && styles.modeBtnActive]}
+            onPress={() => setViewMode("tasks")}
+          >
+            <Text style={[styles.modeBtnText, viewMode === "tasks" && styles.modeBtnTextActive]}>
+              {isTeacher ? "Все задания" : "Задания"}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.modeBtn, viewMode === "results" && styles.modeBtnActive]}
+            onPress={() => setViewMode("results")}
+          >
+            <Text style={[styles.modeBtnText, viewMode === "results" && styles.modeBtnTextActive]}>
+              {isTeacher ? "Ответы учеников" : "Выполненные"}
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        <FlatList
-          horizontal
-          data={FILTERS}
-          keyExtractor={(f) => f}
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterRow}
-          renderItem={({ item: f }) => (
-            <TouchableOpacity
-              style={[styles.filterBtn, filter === f && styles.filterBtnActive]}
-              onPress={() => setFilter(f)}
-            >
-              <Text style={[styles.filterText, filter === f && styles.filterTextActive]}>
-                {f === "Все" ? "Все" : TYPE_LABELS[f]}
-              </Text>
-            </TouchableOpacity>
-          )}
-        />
+        {/* Search bar + filters — only in tasks mode */}
+        {viewMode === "tasks" && (
+          <>
+            <View style={styles.searchBox}>
+              <Feather name="search" size={16} color={colors.mutedForeground} />
+              <TextInput
+                style={styles.searchInput}
+                value={search}
+                onChangeText={setSearch}
+                placeholder="Поиск по названию..."
+                placeholderTextColor={colors.mutedForeground}
+                returnKeyType="search"
+                clearButtonMode="while-editing"
+              />
+              {search.length > 0 && (
+                <TouchableOpacity onPress={() => setSearch("")}>
+                  <Feather name="x" size={16} color={colors.mutedForeground} />
+                </TouchableOpacity>
+              )}
+            </View>
+            <FlatList
+              horizontal
+              data={FILTERS}
+              keyExtractor={(f) => f}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.filterRow}
+              renderItem={({ item: f }) => (
+                <TouchableOpacity
+                  style={[styles.filterBtn, filter === f && styles.filterBtnActive]}
+                  onPress={() => setFilter(f)}
+                >
+                  <Text style={[styles.filterText, filter === f && styles.filterTextActive]}>
+                    {f === "Все" ? "Все" : TYPE_LABELS[f]}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            />
+          </>
+        )}
       </View>
 
-      {isLoading ? (
-        <View style={styles.empty}><ActivityIndicator color={colors.primary} size="large" /></View>
+      {/* ── Results / Completed mode ──────────────────────────────────── */}
+      {viewMode === "results" ? (
+        loadingTeacherSubs || loadingCompleted ? (
+          <View style={styles.empty}><ActivityIndicator color={colors.primary} size="large" /></View>
+        ) : (
+          <ScrollView
+            contentContainerStyle={[styles.list, { paddingTop: 12 }]}
+            showsVerticalScrollIndicator={false}
+          >
+            {isTeacher && (() => {
+              const withSub = teacherSubs.filter(t => !!t.submission);
+              if (withSub.length === 0) return (
+                <View style={[styles.empty, { paddingTop: 40 }]}>
+                  <Feather name="inbox" size={48} color={colors.mutedForeground} />
+                  <Text style={styles.emptyText}>Ответов ещё нет</Text>
+                </View>
+              );
+              return (
+                <>
+                  <Text style={styles.sectionLabel}>Ответы учеников · {withSub.length}</Text>
+                  {withSub
+                    .sort((a, b) => new Date(b.submission.submittedAt).getTime() - new Date(a.submission.submittedAt).getTime())
+                    .map(renderTeacherSubCard)
+                  }
+                </>
+              );
+            })()}
+
+            {isStudent && (() => {
+              if (myCompleted.length === 0) return (
+                <View style={[styles.empty, { paddingTop: 40 }]}>
+                  <Feather name="check-circle" size={48} color={colors.mutedForeground} />
+                  <Text style={styles.emptyText}>Выполненных заданий пока нет</Text>
+                </View>
+              );
+              return (
+                <>
+                  <Text style={styles.sectionLabel}>Выполненные · {myCompleted.length}</Text>
+                  {myCompleted.map(renderCompletedCard)}
+                </>
+              );
+            })()}
+          </ScrollView>
+        )
       ) : (
-        <FlatList
-          data={assignments}
-          keyExtractor={(a) => String(a.id)}
-          renderItem={renderAssignmentCard}
-          contentContainerStyle={[styles.list, { paddingTop: 8 }]}
-          refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={() => { refetch(); loadMyTasks(); loadMyAssignments(); }} />}
-          ListHeaderComponent={
-            <>
-              {/* Teacher: my assignments section — filtered by active tab + search */}
-              {(() => {
-                const filtered = myAssignments.filter(a =>
-                  (filter === "Все" || a.type === filter) &&
-                  (!searchLower || a.title.toLowerCase().includes(searchLower))
-                );
-                return isTeacher && filtered.length > 0 ? (
-                  <View style={{ marginBottom: 8 }}>
-                    <Text style={styles.sectionLabel}>Мои задания · {filtered.length}</Text>
-                    {filtered.map((item) => renderMyAssignmentCard(item))}
-                    <Text style={[styles.sectionLabel, { marginTop: 16 }]}>Все задания</Text>
-                  </View>
-                ) : null;
-              })()}
-              {/* Student: assigned by teacher section — filtered by active tab + search */}
-              {(() => {
-                const filtered = myTasks.filter((t: any) =>
-                  (filter === "Все" || t.type === filter) &&
-                  (!searchLower || t.title.toLowerCase().includes(searchLower))
-                );
-                return isStudent && filtered.length > 0 ? (
-                  <View style={{ marginBottom: 8 }}>
-                    <Text style={styles.sectionLabel}>Назначено учителем · {filtered.length}</Text>
-                    {filtered.map((item: any) => (
-                      <View key={item.assignedTaskId}>
-                        {renderMyTaskCard({ item })}
-                      </View>
-                    ))}
-                    <Text style={[styles.sectionLabel, { marginTop: 16 }]}>Все задания</Text>
-                  </View>
-                ) : null;
-              })()}
-            </>
-          }
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <Feather name="inbox" size={48} color={colors.mutedForeground} />
-              <Text style={styles.emptyText}>
-                {isTeacher ? "Заданий пока нет.\nНажмите + чтобы создать первое." : "Нет доступных заданий"}
-              </Text>
-            </View>
-          }
-        />
+        /* ── Tasks mode (existing) ──────────────────────────────────── */
+        isLoading ? (
+          <View style={styles.empty}><ActivityIndicator color={colors.primary} size="large" /></View>
+        ) : (
+          <FlatList
+            data={assignments}
+            keyExtractor={(a) => String(a.id)}
+            renderItem={renderAssignmentCard}
+            contentContainerStyle={[styles.list, { paddingTop: 8 }]}
+            refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={() => { refetch(); loadMyTasks(); loadMyAssignments(); loadTeacherSubs(); loadMyCompleted(); }} />}
+            ListHeaderComponent={
+              <>
+                {(() => {
+                  const filtered = myAssignments.filter(a =>
+                    (filter === "Все" || a.type === filter) &&
+                    (!searchLower || a.title.toLowerCase().includes(searchLower))
+                  );
+                  return isTeacher && filtered.length > 0 ? (
+                    <View style={{ marginBottom: 8 }}>
+                      <Text style={styles.sectionLabel}>Мои задания · {filtered.length}</Text>
+                      {filtered.map((item) => renderMyAssignmentCard(item))}
+                      <Text style={[styles.sectionLabel, { marginTop: 16 }]}>Все задания</Text>
+                    </View>
+                  ) : null;
+                })()}
+                {(() => {
+                  const filtered = myTasks.filter((t: any) =>
+                    (filter === "Все" || t.type === filter) &&
+                    (!searchLower || t.title.toLowerCase().includes(searchLower))
+                  );
+                  return isStudent && filtered.length > 0 ? (
+                    <View style={{ marginBottom: 8 }}>
+                      <Text style={styles.sectionLabel}>Назначено учителем · {filtered.length}</Text>
+                      {filtered.map((item: any) => (
+                        <View key={item.assignedTaskId}>{renderMyTaskCard({ item })}</View>
+                      ))}
+                      <Text style={[styles.sectionLabel, { marginTop: 16 }]}>Все задания</Text>
+                    </View>
+                  ) : null;
+                })()}
+              </>
+            }
+            ListEmptyComponent={
+              <View style={styles.empty}>
+                <Feather name="inbox" size={48} color={colors.mutedForeground} />
+                <Text style={styles.emptyText}>
+                  {isTeacher ? "Заданий пока нет.\nНажмите + чтобы создать первое." : "Нет доступных заданий"}
+                </Text>
+              </View>
+            }
+          />
+        )
       )}
     </View>
   );

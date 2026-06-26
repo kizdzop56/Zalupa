@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { assignmentsTable, questionsTable, assignedTasksTable, submissionsTable, submissionAnswersTable, usersTable, teacherStudentsTable } from "@workspace/db";
-import { eq, and, gte, lte, inArray, or } from "drizzle-orm";
+import { eq, and, gte, lte, inArray, or, desc } from "drizzle-orm";
 import { requireAuth, getUser, requireRole, isTeacher } from "../lib/auth";
 
 const router = Router();
@@ -117,6 +117,31 @@ router.get("/assignments/teacher-results", requireAuth, async (req, res) => {
   }));
 
   res.json(withSubmissions);
+});
+
+// ── Student: my completed assignments ────────────────────────────────
+router.get("/assignments/my-submissions", requireAuth, async (req, res) => {
+  const caller = getUser(req);
+
+  const rows = await db.select({
+    submissionId: submissionsTable.id,
+    score: submissionsTable.score,
+    correctCount: submissionsTable.correctCount,
+    totalQuestions: submissionsTable.totalQuestions,
+    pointsEarned: submissionsTable.pointsEarned,
+    submittedAt: submissionsTable.submittedAt,
+    assignmentId: assignmentsTable.id,
+    title: assignmentsTable.title,
+    description: assignmentsTable.description,
+    type: assignmentsTable.type,
+    points: assignmentsTable.points,
+  })
+    .from(submissionsTable)
+    .leftJoin(assignmentsTable, eq(submissionsTable.assignmentId, assignmentsTable.id))
+    .where(eq(submissionsTable.studentId, caller.userId))
+    .orderBy(desc(submissionsTable.submittedAt));
+
+  res.json(rows);
 });
 
 // ── Create assignment (teacher or admin) ──────────────────────────────

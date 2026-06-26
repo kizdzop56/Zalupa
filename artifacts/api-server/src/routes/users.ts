@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { usersTable, submissionsTable, timeSessionsTable, assignmentsTable } from "@workspace/db";
-import { eq, and, sql, desc, isNull } from "drizzle-orm";
+import { eq, and, sql, desc, isNull, inArray } from "drizzle-orm";
 import { requireAuth, getUser, isTeacher } from "../lib/auth";
 
 const router = Router();
@@ -130,6 +130,64 @@ router.get("/users/:id/children", requireAuth, async (req, res) => {
     createdAt: usersTable.createdAt,
   }).from(usersTable).where(eq(usersTable.parentId, id));
   res.json(children);
+});
+
+// ── Teacher: view student's submission history ────────────────────────
+router.get("/students/:id/submissions", requireAuth, async (req, res) => {
+  const caller = getUser(req);
+  const studentId = Number(req.params["id"]);
+
+  if (!isTeacher(caller.role) && caller.role !== "admin" && caller.userId !== studentId) {
+    res.status(403).json({ error: "Forbidden" }); return;
+  }
+
+  const rows = await db.select({
+    submissionId: submissionsTable.id,
+    score: submissionsTable.score,
+    correctCount: submissionsTable.correctCount,
+    totalQuestions: submissionsTable.totalQuestions,
+    pointsEarned: submissionsTable.pointsEarned,
+    submittedAt: submissionsTable.submittedAt,
+    assignmentId: assignmentsTable.id,
+    title: assignmentsTable.title,
+    type: assignmentsTable.type,
+    points: assignmentsTable.points,
+  })
+    .from(submissionsTable)
+    .leftJoin(assignmentsTable, eq(submissionsTable.assignmentId, assignmentsTable.id))
+    .where(eq(submissionsTable.studentId, studentId))
+    .orderBy(desc(submissionsTable.submittedAt));
+
+  res.json(rows);
+});
+
+// ── Teacher: per-category score stats for a student ───────────────────
+router.get("/students/:id/category-stats", requireAuth, async (req, res) => {
+  const caller = getUser(req);
+  const studentId = Number(req.params["id"]);
+
+  if (!isTeacher(caller.role) && caller.role !== "admin" && caller.userId !== studentId) {
+    res.status(403).json({ error: "Forbidden" }); return;
+  }
+
+  const rows = await db.select({
+    score: submissionsTable.score,
+    type: assignmentsTable.type,
+  })
+    .from(submissionsTable)
+    .leftJoin(assignmentsTable, eq(submissionsTable.assignmentId, assignmentsTable.id))
+    .where(eq(submissionsTable.studentId, studentId));
+
+  const CATEGORIES = ["text_test", "audio", "reading", "video"] as const;
+  const stats = CATEGORIES.map((cat) => {
+    const catRows = rows.filter((r) => r.type === cat);
+    const avgScore = catRows.length > 0
+      ? Math.round(catRows.reduce((s, r) => s + (r.score ?? 0), 0) / catRows.length)
+      : null;
+    return { type: cat, avgScore, count: catRows.length };
+  });
+
+  res.json(stats);
 });
 
 export default router;
