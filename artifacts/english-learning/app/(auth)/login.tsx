@@ -147,12 +147,6 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.adminHint}>
-            <Text style={styles.adminHintText}>
-              <Text style={styles.adminHintBold}>Аккаунт администратора: </Text>
-              псевдоним: <Text style={styles.adminHintBold}>admin</Text> / пароль: <Text style={styles.adminHintBold}>admin123</Text>
-            </Text>
-          </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

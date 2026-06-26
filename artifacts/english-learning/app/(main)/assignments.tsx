@@ -1,9 +1,9 @@
 import React, { useState, useCallback, useEffect } from "react";
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl, Platform, Modal, ScrollView, Alert,
+  ActivityIndicator, RefreshControl, Platform, Modal, ScrollView, Alert, TextInput,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
@@ -205,6 +205,7 @@ export default function AssignmentsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [filter, setFilter] = useState<Filter>("Все");
+  const [search, setSearch] = useState("");
   const [assignTarget, setAssignTarget] = useState<Assignment | null>(null);
   const [myTasks, setMyTasks] = useState<any[]>([]);
   const [loadingMyTasks, setLoadingMyTasks] = useState(false);
@@ -235,6 +236,13 @@ export default function AssignmentsScreen() {
   useEffect(() => { loadMyTasks(); }, [loadMyTasks]);
   useEffect(() => { loadMyAssignments(); }, [loadMyAssignments]);
 
+  // Refresh list when navigating back from create-assignment
+  useFocusEffect(useCallback(() => {
+    refetch();
+    loadMyTasks();
+    loadMyAssignments();
+  }, [refetch, loadMyTasks, loadMyAssignments]));
+
   const handleDeleteAssignment = async (id: number) => {
     setDeletingId(id);
     try {
@@ -247,8 +255,10 @@ export default function AssignmentsScreen() {
     }
   };
 
-  const assignments = (allAssignments ?? []).filter(
-    (a) => filter === "Все" || a.type === filter
+  const searchLower = search.trim().toLowerCase();
+  const assignments = (allAssignments ?? []).filter((a) =>
+    (filter === "Все" || a.type === filter) &&
+    (!searchLower || a.title.toLowerCase().includes(searchLower) || (a.description ?? "").toLowerCase().includes(searchLower))
   );
 
   const styles = StyleSheet.create({
@@ -270,6 +280,16 @@ export default function AssignmentsScreen() {
       marginTop: 8, borderWidth: 1,
     },
     levelBannerText: { fontSize: 13, fontWeight: "700" },
+    searchBox: {
+      flexDirection: "row", alignItems: "center", gap: 8,
+      backgroundColor: colors.muted, borderRadius: 12, paddingHorizontal: 12,
+      paddingVertical: Platform.OS === "web" ? 9 : 8, marginTop: 10,
+      borderWidth: 1, borderColor: colors.border,
+    },
+    searchInput: {
+      flex: 1, fontSize: 14, color: colors.foreground,
+      ...(Platform.OS === "web" ? { outlineWidth: 0 } as any : {}),
+    },
     filterRow: { flexDirection: "row", gap: 8, paddingVertical: 12 },
     filterBtn: {
       paddingHorizontal: 14, paddingVertical: 7,
@@ -492,6 +512,25 @@ export default function AssignmentsScreen() {
           </View>
         )}
 
+        {/* Search bar */}
+        <View style={styles.searchBox}>
+          <Feather name="search" size={16} color={colors.mutedForeground} />
+          <TextInput
+            style={styles.searchInput}
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Поиск по названию..."
+            placeholderTextColor={colors.mutedForeground}
+            returnKeyType="search"
+            clearButtonMode="while-editing"
+          />
+          {search.length > 0 && (
+            <TouchableOpacity onPress={() => setSearch("")}>
+              <Feather name="x" size={16} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          )}
+        </View>
+
         <FlatList
           horizontal
           data={FILTERS}
@@ -522,9 +561,12 @@ export default function AssignmentsScreen() {
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={() => { refetch(); loadMyTasks(); loadMyAssignments(); }} />}
           ListHeaderComponent={
             <>
-              {/* Teacher: my assignments section — filtered by active tab */}
+              {/* Teacher: my assignments section — filtered by active tab + search */}
               {(() => {
-                const filtered = myAssignments.filter(a => filter === "Все" || a.type === filter);
+                const filtered = myAssignments.filter(a =>
+                  (filter === "Все" || a.type === filter) &&
+                  (!searchLower || a.title.toLowerCase().includes(searchLower))
+                );
                 return isTeacher && filtered.length > 0 ? (
                   <View style={{ marginBottom: 8 }}>
                     <Text style={styles.sectionLabel}>Мои задания · {filtered.length}</Text>
@@ -533,9 +575,12 @@ export default function AssignmentsScreen() {
                   </View>
                 ) : null;
               })()}
-              {/* Student: assigned by teacher section — filtered by active tab */}
+              {/* Student: assigned by teacher section — filtered by active tab + search */}
               {(() => {
-                const filtered = myTasks.filter((t: any) => filter === "Все" || t.type === filter);
+                const filtered = myTasks.filter((t: any) =>
+                  (filter === "Все" || t.type === filter) &&
+                  (!searchLower || t.title.toLowerCase().includes(searchLower))
+                );
                 return isStudent && filtered.length > 0 ? (
                   <View style={{ marginBottom: 8 }}>
                     <Text style={styles.sectionLabel}>Назначено учителем · {filtered.length}</Text>

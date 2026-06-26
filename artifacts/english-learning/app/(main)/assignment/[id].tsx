@@ -86,9 +86,13 @@ export default function AssignmentDetailScreen() {
   const isAdmin = user?.role === "admin";
   const isTeacherRole = user?.role === "teacher" || user?.role === "admin";
 
-  // Load assignment
+  // Load assignment — also resets all answer state when navigating to a different assignment
   useEffect(() => {
     if (!assignmentId) return;
+    setAssignment(null);
+    setAnswers({});
+    setSubmitted(false);
+    setResult(null);
     setIsLoading(true);
     setFetchError(null);
     apiFetch(`/api/assignments/${assignmentId}`)
