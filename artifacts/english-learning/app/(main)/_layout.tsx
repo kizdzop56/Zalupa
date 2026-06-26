@@ -115,6 +115,15 @@ export default function MainLayout() {
           }
         />
 
+        {/* Анализ — только учитель */}
+        <Tabs.Screen
+          name="analysis"
+          options={isTeacher
+            ? { title: "Анализ", tabBarIcon: ({ color }) => <Feather name="bar-chart-2" size={22} color={color} /> }
+            : { href: null }
+          }
+        />
+
         {/* Профиль — для всех */}
         <Tabs.Screen
           name="profile"
@@ -130,6 +139,7 @@ export default function MainLayout() {
         <Tabs.Screen name="create-assignment" options={{ href: null }} />
         <Tabs.Screen name="friend/[id]" options={{ href: null }} />
         <Tabs.Screen name="teacher-results/[id]" options={{ href: null }} />
+        <Tabs.Screen name="submission-review/[id]" options={{ href: null }} />
       </Tabs>
     </>
   );

@@ -73,8 +73,9 @@ export default function LoginScreen() {
       backgroundColor: colors.card, borderWidth: 1.5, borderColor: colors.border,
       borderRadius: 13, flexDirection: "row", alignItems: "center",
       paddingHorizontal: 14, marginBottom: 14,
+      ...(Platform.OS === "web" ? { outlineWidth: 0 } as any : {}),
     },
-    input: { flex: 1, fontSize: 15, color: colors.foreground, paddingVertical: 14, ...(Platform.OS === "web" ? { outlineWidth: 0 } as any : {}) },
+    input: { flex: 1, fontSize: 15, color: colors.foreground, paddingVertical: 14, ...(Platform.OS === "web" ? { outlineWidth: 0, outlineStyle: "none" } as any : {}) },
     eyeBtn: { padding: 6 },
     error: { fontSize: 14, color: colors.destructive, textAlign: "center", marginBottom: 12 },
     button: {

@@ -106,10 +106,12 @@ router.get("/assignments/teacher-results", requireAuth, async (req, res) => {
     let answers: any[] = [];
     if (submission) {
       answers = await db.select({
+        id: submissionAnswersTable.id,
         questionId: submissionAnswersTable.questionId,
-        answer: submissionAnswersTable.studentAnswer,
+        studentAnswer: submissionAnswersTable.studentAnswer,
         isCorrect: submissionAnswersTable.isCorrect,
         correctAnswer: submissionAnswersTable.correctAnswer,
+        questionText: submissionAnswersTable.questionText,
       }).from(submissionAnswersTable).where(eq(submissionAnswersTable.submissionId, submission.id));
     }
 
@@ -142,6 +144,48 @@ router.get("/assignments/my-submissions", requireAuth, async (req, res) => {
     .orderBy(desc(submissionsTable.submittedAt));
 
   res.json(rows);
+});
+
+// ── Review a submission (student sees own answers, teacher sees any) ──
+router.get("/submissions/:submissionId/review", requireAuth, async (req, res) => {
+  const caller = getUser(req);
+  const submissionId = Number(req.params["submissionId"]);
+
+  const [submission] = await db.select({
+    id: submissionsTable.id,
+    score: submissionsTable.score,
+    correctCount: submissionsTable.correctCount,
+    totalQuestions: submissionsTable.totalQuestions,
+    pointsEarned: submissionsTable.pointsEarned,
+    submittedAt: submissionsTable.submittedAt,
+    studentId: submissionsTable.studentId,
+    assignmentId: submissionsTable.assignmentId,
+  }).from(submissionsTable).where(eq(submissionsTable.id, submissionId));
+
+  if (!submission) { res.status(404).json({ error: "Submission not found" }); return; }
+
+  if (!isTeacher(caller.role) && submission.studentId !== caller.userId) {
+    res.status(403).json({ error: "Forbidden" }); return;
+  }
+
+  const [assignment] = await db.select({
+    id: assignmentsTable.id,
+    title: assignmentsTable.title,
+    type: assignmentsTable.type,
+    points: assignmentsTable.points,
+  }).from(assignmentsTable).where(eq(assignmentsTable.id, submission.assignmentId));
+
+  const answers = await db.select({
+    id: submissionAnswersTable.id,
+    questionId: submissionAnswersTable.questionId,
+    studentAnswer: submissionAnswersTable.studentAnswer,
+    isCorrect: submissionAnswersTable.isCorrect,
+    correctAnswer: submissionAnswersTable.correctAnswer,
+    questionText: submissionAnswersTable.questionText,
+  }).from(submissionAnswersTable)
+    .where(eq(submissionAnswersTable.submissionId, submissionId));
+
+  res.json({ ...submission, assignment: assignment ?? null, answers });
 });
 
 // ── Create assignment (teacher or admin) ──────────────────────────────

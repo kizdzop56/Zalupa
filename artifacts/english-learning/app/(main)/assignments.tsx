@@ -8,7 +8,6 @@ import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useAuth, isTeacherOrAdmin, LEVEL_META } from "@/contexts/AuthContext";
-import { useListAssignments } from "@workspace/api-client-react";
 import type { Assignment } from "@workspace/api-client-react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -207,7 +206,7 @@ export default function AssignmentsScreen() {
   const [filter, setFilter] = useState<Filter>("Все");
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"tasks" | "results">("tasks");
-  const [assignTarget, setAssignTarget] = useState<Assignment | null>(null);
+  const [assignTarget, setAssignTarget] = useState<any>(null);
   const [myTasks, setMyTasks] = useState<any[]>([]);
   const [loadingMyTasks, setLoadingMyTasks] = useState(false);
   const [myAssignments, setMyAssignments] = useState<any[]>([]);
@@ -221,8 +220,7 @@ export default function AssignmentsScreen() {
   const isStudent = user?.role === "student";
   const levelMeta = user?.knowledgeLevel ? LEVEL_META[user.knowledgeLevel] : null;
 
-  const queryParams = isStudent && user?.age ? { ageMin: user.age, ageMax: user.age } : {};
-  const { data: allAssignments, isLoading, refetch, isRefetching } = useListAssignments(queryParams);
+  const [refreshing, setRefreshing] = useState(false);
 
   const loadMyTasks = useCallback(async () => {
     if (!isStudent) return;
@@ -261,12 +259,17 @@ export default function AssignmentsScreen() {
 
   // Refresh all data when screen comes into focus
   useFocusEffect(useCallback(() => {
-    refetch();
     loadMyTasks();
     loadMyAssignments();
     loadTeacherSubs();
     loadMyCompleted();
-  }, [refetch, loadMyTasks, loadMyAssignments, loadTeacherSubs, loadMyCompleted]));
+  }, [loadMyTasks, loadMyAssignments, loadTeacherSubs, loadMyCompleted]));
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([loadMyTasks(), loadMyAssignments(), loadTeacherSubs(), loadMyCompleted()]);
+    setRefreshing(false);
+  }, [loadMyTasks, loadMyAssignments, loadTeacherSubs, loadMyCompleted]);
 
   const handleDeleteAssignment = async (id: number) => {
     setDeletingId(id);
@@ -281,10 +284,6 @@ export default function AssignmentsScreen() {
   };
 
   const searchLower = search.trim().toLowerCase();
-  const assignments = (allAssignments ?? []).filter((a) =>
-    (filter === "Все" || a.type === filter) &&
-    (!searchLower || a.title.toLowerCase().includes(searchLower) || (a.description ?? "").toLowerCase().includes(searchLower))
-  );
 
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
@@ -386,54 +385,6 @@ export default function AssignmentsScreen() {
     },
   });
 
-  const renderAssignmentCard = ({ item }: { item: Assignment }) => {
-    const color = TYPE_COLORS[item.type] || colors.primary;
-    return (
-      <TouchableOpacity
-        style={styles.card}
-        onPress={() => router.push(`/(main)/assignment/${item.id}` as any)}
-        activeOpacity={0.75}
-      >
-        <View style={styles.cardHeader}>
-          <View style={[styles.typeIcon, { backgroundColor: color + "20" }]}>
-            <Feather name={TYPE_ICONS[item.type]} size={22} color={color} />
-          </View>
-          <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
-        </View>
-        <Text style={styles.cardDesc} numberOfLines={2}>{item.description}</Text>
-        <View style={styles.cardFooter}>
-          <View style={[styles.typeBadge, { backgroundColor: color + "15" }]}>
-            <Text style={[styles.typeBadgeText, { color }]}>{TYPE_LABELS[item.type]}</Text>
-          </View>
-          <View style={styles.pointsBadge}>
-            <Feather name="star" size={12} color="#92400e" />
-            <Text style={styles.pointsText}>{item.points} очков</Text>
-          </View>
-          <Text style={styles.ageText}>{item.ageMin}–{item.ageMax} лет</Text>
-        </View>
-
-        {isTeacher && (
-          <View style={styles.cardActions}>
-            <TouchableOpacity
-              style={[styles.actionBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "10" }]}
-              onPress={(e) => { e.stopPropagation(); setAssignTarget(item); }}
-            >
-              <Feather name="send" size={15} color={colors.primary} />
-              <Text style={[styles.actionBtnText, { color: colors.primary }]}>Назначить</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.actionBtn, { borderColor: colors.border, backgroundColor: colors.card }]}
-              onPress={(e) => { e.stopPropagation(); router.push(`/(main)/teacher-results/${item.id}` as any); }}
-            >
-              <Feather name="bar-chart-2" size={15} color={colors.mutedForeground} />
-              <Text style={[styles.actionBtnText, { color: colors.mutedForeground }]}>Результаты</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </TouchableOpacity>
-    );
-  };
-
   const renderMyTaskCard = ({ item }: { item: any }) => {
     const color = TYPE_COLORS[item.type] || colors.primary;
     return (
@@ -526,7 +477,7 @@ export default function AssignmentsScreen() {
     );
   };
 
-  // ── Teacher: render one student submission card ──────────────────────
+  // ── Teacher: render one student submission card (tappable → details) ──
   const renderTeacherSubCard = (item: any) => {
     const color = TYPE_COLORS[item.assignmentType] || colors.primary;
     const hasSub = !!item.submission;
@@ -534,7 +485,12 @@ export default function AssignmentsScreen() {
     const score = item.submission.score;
     const scoreColor = score >= 70 ? colors.success : score >= 40 ? "#f59e0b" : colors.destructive;
     return (
-      <View key={`${item.assignedTaskId}`} style={styles.subCard}>
+      <TouchableOpacity
+        key={`${item.assignedTaskId}`}
+        style={styles.subCard}
+        onPress={() => router.push(`/(main)/teacher-results/${item.assignmentId}` as any)}
+        activeOpacity={0.75}
+      >
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 }}>
           <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: (item.studentAvatarColor ?? "#6366f1"), justifyContent: "center", alignItems: "center" }}>
             <Text style={{ fontSize: 18 }}>{item.studentAvatarEmoji ?? "🦁"}</Text>
@@ -543,8 +499,11 @@ export default function AssignmentsScreen() {
             <Text style={{ fontSize: 14, fontWeight: "700", color: colors.foreground }}>{item.studentName}</Text>
             <Text style={{ fontSize: 12, color: colors.mutedForeground }} numberOfLines={1}>{item.assignmentTitle}</Text>
           </View>
-          <View style={[styles.scoreBadge, { backgroundColor: scoreColor + "18" }]}>
-            <Text style={{ fontSize: 16, fontWeight: "900", color: scoreColor }}>{score}%</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <View style={[styles.scoreBadge, { backgroundColor: scoreColor + "18" }]}>
+              <Text style={{ fontSize: 16, fontWeight: "900", color: scoreColor }}>{score}%</Text>
+            </View>
+            <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
           </View>
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -558,23 +517,31 @@ export default function AssignmentsScreen() {
             {new Date(item.submission.submittedAt).toLocaleDateString("ru-RU")}
           </Text>
         </View>
-      </View>
+      </TouchableOpacity>
     );
   };
 
-  // ── Student: render one completed assignment card ─────────────────────
+  // ── Student: render one completed assignment card (tappable → review) ──
   const renderCompletedCard = (item: any) => {
     const color = TYPE_COLORS[item.type] || colors.primary;
     const scoreColor = item.score >= 70 ? colors.success : item.score >= 40 ? "#f59e0b" : colors.destructive;
     return (
-      <View key={`${item.submissionId}`} style={styles.subCard}>
+      <TouchableOpacity
+        key={`${item.submissionId}`}
+        style={styles.subCard}
+        onPress={() => router.push(`/(main)/submission-review/${item.submissionId}` as any)}
+        activeOpacity={0.75}
+      >
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 }}>
           <View style={[styles.typeIcon, { backgroundColor: color + "20" }]}>
             <Feather name={TYPE_ICONS[item.type] ?? "edit-3"} size={20} color={color} />
           </View>
           <Text style={[styles.cardTitle, { flex: 1 }]} numberOfLines={2}>{item.title}</Text>
-          <View style={[styles.scoreBadge, { backgroundColor: scoreColor + "18" }]}>
-            <Text style={{ fontSize: 16, fontWeight: "900", color: scoreColor }}>{item.score}%</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <View style={[styles.scoreBadge, { backgroundColor: scoreColor + "18" }]}>
+              <Text style={{ fontSize: 16, fontWeight: "900", color: scoreColor }}>{item.score}%</Text>
+            </View>
+            <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
           </View>
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -588,7 +555,7 @@ export default function AssignmentsScreen() {
           </View>
           <Text style={styles.ageText}>{new Date(item.submittedAt).toLocaleDateString("ru-RU")}</Text>
         </View>
-      </View>
+      </TouchableOpacity>
     );
   };
 
@@ -598,7 +565,7 @@ export default function AssignmentsScreen() {
         visible={!!assignTarget}
         assignment={assignTarget}
         onClose={() => setAssignTarget(null)}
-        onDone={() => { loadMyAssignments(); refetch(); }}
+        onDone={() => { loadMyAssignments(); }}
       />
 
       <View style={styles.header}>
@@ -629,7 +596,7 @@ export default function AssignmentsScreen() {
             onPress={() => setViewMode("tasks")}
           >
             <Text style={[styles.modeBtnText, viewMode === "tasks" && styles.modeBtnTextActive]}>
-              {isTeacher ? "Все задания" : "Задания"}
+              {isTeacher ? "Мои задания" : "Назначенные"}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -728,57 +695,63 @@ export default function AssignmentsScreen() {
           </ScrollView>
         )
       ) : (
-        /* ── Tasks mode (existing) ──────────────────────────────────── */
-        isLoading ? (
+        /* ── Tasks mode ─────────────────────────────────────────────── */
+        loadingMyTasks && isStudent ? (
           <View style={styles.empty}><ActivityIndicator color={colors.primary} size="large" /></View>
         ) : (
-          <FlatList
-            data={assignments}
-            keyExtractor={(a) => String(a.id)}
-            renderItem={renderAssignmentCard}
-            contentContainerStyle={[styles.list, { paddingTop: 8 }]}
-            refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={() => { refetch(); loadMyTasks(); loadMyAssignments(); loadTeacherSubs(); loadMyCompleted(); }} />}
-            ListHeaderComponent={
-              <>
-                {(() => {
-                  const filtered = myAssignments.filter(a =>
-                    (filter === "Все" || a.type === filter) &&
-                    (!searchLower || a.title.toLowerCase().includes(searchLower))
-                  );
-                  return isTeacher && filtered.length > 0 ? (
-                    <View style={{ marginBottom: 8 }}>
-                      <Text style={styles.sectionLabel}>Мои задания · {filtered.length}</Text>
-                      {filtered.map((item) => renderMyAssignmentCard(item))}
-                      <Text style={[styles.sectionLabel, { marginTop: 16 }]}>Все задания</Text>
-                    </View>
-                  ) : null;
-                })()}
-                {(() => {
-                  const filtered = myTasks.filter((t: any) =>
-                    (filter === "Все" || t.type === filter) &&
-                    (!searchLower || t.title.toLowerCase().includes(searchLower))
-                  );
-                  return isStudent && filtered.length > 0 ? (
-                    <View style={{ marginBottom: 8 }}>
-                      <Text style={styles.sectionLabel}>Назначено учителем · {filtered.length}</Text>
-                      {filtered.map((item: any) => (
-                        <View key={item.assignedTaskId}>{renderMyTaskCard({ item })}</View>
-                      ))}
-                      <Text style={[styles.sectionLabel, { marginTop: 16 }]}>Все задания</Text>
-                    </View>
-                  ) : null;
-                })()}
-              </>
-            }
-            ListEmptyComponent={
-              <View style={styles.empty}>
-                <Feather name="inbox" size={48} color={colors.mutedForeground} />
-                <Text style={styles.emptyText}>
-                  {isTeacher ? "Заданий пока нет.\nНажмите + чтобы создать первое." : "Нет доступных заданий"}
-                </Text>
-              </View>
-            }
-          />
+          <ScrollView
+            contentContainerStyle={[styles.list, { paddingTop: 12 }]}
+            showsVerticalScrollIndicator={false}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+          >
+            {/* Teacher: only own assignments */}
+            {isTeacher && (() => {
+              const filtered = myAssignments.filter(a =>
+                (filter === "Все" || a.type === filter) &&
+                (!searchLower || a.title.toLowerCase().includes(searchLower))
+              );
+              if (filtered.length === 0) return (
+                <View style={[styles.empty, { paddingTop: 40 }]}>
+                  <Feather name="inbox" size={48} color={colors.mutedForeground} />
+                  <Text style={styles.emptyText}>Заданий пока нет.{"\n"}Нажмите + чтобы создать первое.</Text>
+                </View>
+              );
+              return (
+                <>
+                  <Text style={styles.sectionLabel}>Мои задания · {filtered.length}</Text>
+                  {filtered.map(renderMyAssignmentCard)}
+                </>
+              );
+            })()}
+
+            {/* Student: assigned tasks, excluding already completed */}
+            {isStudent && (() => {
+              const completedIds = new Set(myCompleted.map((c: any) => c.assignmentId));
+              const filtered = myTasks.filter((t: any) =>
+                !completedIds.has(t.assignmentId) &&
+                (filter === "Все" || t.type === filter) &&
+                (!searchLower || t.title.toLowerCase().includes(searchLower))
+              );
+              if (filtered.length === 0) return (
+                <View style={[styles.empty, { paddingTop: 40 }]}>
+                  <Feather name="check-circle" size={48} color={colors.mutedForeground} />
+                  <Text style={styles.emptyText}>
+                    {myTasks.length > 0
+                      ? "Все задания выполнены! 🎉\nПроверь вкладку «Выполненные»."
+                      : "Учитель ещё не назначил заданий"}
+                  </Text>
+                </View>
+              );
+              return (
+                <>
+                  <Text style={styles.sectionLabel}>Назначено учителем · {filtered.length}</Text>
+                  {filtered.map((item: any) => (
+                    <View key={item.assignedTaskId}>{renderMyTaskCard({ item })}</View>
+                  ))}
+                </>
+              );
+            })()}
+          </ScrollView>
         )
       )}
     </View>
