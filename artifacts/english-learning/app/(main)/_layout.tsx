@@ -7,14 +7,23 @@ import { useColors } from "@/hooks/useColors";
 import { useAuth, isTeacherOrAdmin } from "@/contexts/AuthContext";
 import { useEffect } from "react";
 import { useStartTimeSession, useEndTimeSession } from "@workspace/api-client-react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+export const SESSION_START_KEY = "timer_session_start";
 
 function StudentTimerManager() {
   const { mutate: startSession } = useStartTimeSession();
   const { mutate: endSession } = useEndTimeSession();
 
   useEffect(() => {
+    // Save session start timestamp so the live timer can restore elapsed time on re-mount
+    const now = String(Date.now());
+    AsyncStorage.setItem(SESSION_START_KEY, now);
     startSession(undefined);
-    return () => { endSession(undefined); };
+    return () => {
+      AsyncStorage.removeItem(SESSION_START_KEY);
+      endSession(undefined);
+    };
   }, []);
 
   return null;

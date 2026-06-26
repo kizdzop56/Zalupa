@@ -36,14 +36,23 @@ function formatTime(minutes: number) {
   return `${h} ч ${m} мин`;
 }
 
-// Live in-app timer (counts up from 0 this session)
+// Live in-app timer — restores elapsed time from session start saved in AsyncStorage
+const SESSION_START_KEY = "timer_session_start";
+
 function useLiveTimer() {
   const [seconds, setSeconds] = useState(0);
   const ref = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useEffect(() => {
-    ref.current = setInterval(() => setSeconds((s) => s + 1), 1000);
+    // Read session start from AsyncStorage to get accurate elapsed time even after tab switches
+    AsyncStorage.getItem(SESSION_START_KEY).then((stored) => {
+      const initial = stored ? Math.floor((Date.now() - Number(stored)) / 1000) : 0;
+      setSeconds(Math.max(0, initial));
+      ref.current = setInterval(() => setSeconds((s) => s + 1), 1000);
+    });
     return () => { if (ref.current) clearInterval(ref.current); };
   }, []);
+
   return seconds;
 }
 

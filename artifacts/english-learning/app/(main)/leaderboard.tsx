@@ -1,11 +1,12 @@
 import React from "react";
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, Platform } from "react-native";
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, Platform, TouchableOpacity } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useAuth } from "@/contexts/AuthContext";
 import { useGetLeaderboard } from "@workspace/api-client-react";
 import type { LeaderboardEntry } from "@workspace/api-client-react";
+import { useRouter } from "expo-router";
 
 const MEDAL_COLORS = ["#f59e0b", "#94a3b8", "#b45309"];
 
@@ -13,6 +14,7 @@ export default function LeaderboardScreen() {
   const colors = useColors();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { data: leaderboard, isLoading } = useGetLeaderboard();
 
   const styles = StyleSheet.create({
@@ -51,10 +53,13 @@ export default function LeaderboardScreen() {
 
   const myEntry = leaderboard?.find(e => e.userId === user?.id);
 
-  const renderItem = ({ item }: { item: LeaderboardEntry }) => {
+  const renderItem = ({ item }: { item: LeaderboardEntry & { avatarEmoji?: string | null; avatarColor?: string | null } }) => {
     const isMe = item.userId === user?.id;
     const medalColor = MEDAL_COLORS[item.rank - 1];
-    return (
+    const avatarBg = (item as any).avatarColor ?? "#6366f1";
+    const avatarEmoji = (item as any).avatarEmoji ?? "🦁";
+
+    const content = (
       <View style={[styles.item, isMe && styles.itemMe]}>
         <View style={[styles.rank, { backgroundColor: medalColor ? medalColor + "20" : colors.muted }]}>
           {item.rank <= 3 ? (
@@ -63,32 +68,56 @@ export default function LeaderboardScreen() {
             <Text style={[styles.rankText, { color: colors.mutedForeground }]}>#{item.rank}</Text>
           )}
         </View>
-        <Text style={styles.name} numberOfLines={1}>{item.name}{isMe ? " (You)" : ""}</Text>
-        <View style={styles.pointsBox}>
-          <Text style={styles.points}>{item.totalPoints}</Text>
-          <Text style={styles.completed}>{item.completedAssignments} done</Text>
+
+        {/* Avatar */}
+        <View style={{
+          width: 38, height: 38, borderRadius: 19,
+          backgroundColor: avatarBg,
+          justifyContent: "center", alignItems: "center",
+        }}>
+          <Text style={{ fontSize: 18 }}>{avatarEmoji}</Text>
         </View>
+
+        <Text style={styles.name} numberOfLines={1}>
+          {item.name}{isMe ? " (Я)" : ""}
+        </Text>
+        <View style={styles.pointsBox}>
+          <Text style={styles.points}>{item.totalPoints} ⭐</Text>
+          <Text style={styles.completed}>{item.completedAssignments} заданий</Text>
+        </View>
+        {!isMe && <Feather name="chevron-right" size={16} color={colors.mutedForeground} />}
       </View>
+    );
+
+    if (isMe) return content;
+
+    return (
+      <TouchableOpacity
+        activeOpacity={0.7}
+        onPress={() => router.push(`/(main)/friend/${item.userId}` as any)}
+      >
+        {content}
+      </TouchableOpacity>
     );
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Leaderboard</Text>
-        <Text style={styles.subtitle}>Top English learners this month</Text>
+        <Text style={styles.title}>Рейтинг</Text>
+        <Text style={styles.subtitle}>Топ учеников — нажми на любого, чтобы посмотреть профиль</Text>
       </View>
 
       {myEntry && (
         <View style={styles.myCard}>
           <Feather name="star" size={28} color={colors.primary} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.myCardLabel}>Your rank</Text>
+            <Text style={styles.myCardLabel}>Моё место</Text>
             <Text style={styles.myCardText}>#{myEntry.rank} — {user?.name}</Text>
           </View>
           <View style={{ alignItems: "flex-end" }}>
-            <Text style={styles.myCardPoints}>{myEntry.totalPoints}</Text>
-            <Text style={styles.myCardLabel}>points</Text>
+            <Text style={styles.myCardPoints}>{myEntry.totalPoints} ⭐</Text>
+            <Text style={styles.myCardLabel}>очков</Text>
           </View>
         </View>
       )}
@@ -98,7 +127,7 @@ export default function LeaderboardScreen() {
       ) : !leaderboard?.length ? (
         <View style={styles.empty}>
           <Feather name="award" size={48} color={colors.mutedForeground} />
-          <Text style={styles.emptyText}>No entries yet</Text>
+          <Text style={styles.emptyText}>Пока никого нет</Text>
         </View>
       ) : (
         <FlatList

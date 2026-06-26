@@ -61,7 +61,8 @@ export default function FriendProfileScreen() {
 
   useEffect(() => {
     if (!friendId) return;
-    apiFetch(`/api/connections/friends/${friendId}/profile`)
+    // Use the general user endpoint — visible to any authenticated user (read-only)
+    apiFetch(`/api/users/${friendId}`)
       .then(setProfile)
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
