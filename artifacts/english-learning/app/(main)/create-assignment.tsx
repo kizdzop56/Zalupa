@@ -7,6 +7,7 @@ import { useRouter, useFocusEffect } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
+import { useAuth, isTeacherOrAdmin } from "@/contexts/AuthContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const BASE = process.env["EXPO_PUBLIC_DOMAIN"]
@@ -67,6 +68,7 @@ export default function CreateAssignmentScreen() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
 
   const [st, setSt] = useState(FRESH());
   const [uploading, setUploading] = useState<string | null>(null);
@@ -173,8 +175,8 @@ export default function CreateAssignmentScreen() {
       }
     }
 
-    if (type === "reading" && !imageUrl.trim() && !videoUrl.trim()) {
-      set("formError", "Для задания «Чтение» необходимо прикрепить изображение или видео");
+    if (type === "reading" && !imageUrl.trim() && !videoUrl.trim() && !content.trim()) {
+      set("formError", "Для задания «Чтение» необходимо добавить хотя бы одно: текст, изображение или видео");
       return;
     }
 
@@ -458,6 +460,26 @@ export default function CreateAssignmentScreen() {
           <Text style={{ fontSize: 20, fontWeight: "800", color: colors.foreground }}>Задание создано!</Text>
           <Text style={{ fontSize: 14, color: colors.mutedForeground }}>Возвращаемся к заданиям…</Text>
         </View>
+      </View>
+    );
+  }
+
+  if (user && !isTeacherOrAdmin(user.role)) {
+    return (
+      <View style={[s.container, { justifyContent: "center", alignItems: "center", padding: 32 }]}>
+        <Feather name="lock" size={48} color={colors.mutedForeground} />
+        <Text style={{ fontSize: 18, fontWeight: "700", color: colors.foreground, marginTop: 16, textAlign: "center" }}>
+          Нет доступа
+        </Text>
+        <Text style={{ fontSize: 14, color: colors.mutedForeground, marginTop: 8, textAlign: "center" }}>
+          Создавать задания могут только учителя
+        </Text>
+        <TouchableOpacity
+          style={{ marginTop: 24, backgroundColor: colors.primary, borderRadius: 14, paddingHorizontal: 24, paddingVertical: 12 }}
+          onPress={() => router.back()}
+        >
+          <Text style={{ color: "#fff", fontWeight: "700", fontSize: 15 }}>Назад</Text>
+        </TouchableOpacity>
       </View>
     );
   }

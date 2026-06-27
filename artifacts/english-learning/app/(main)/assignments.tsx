@@ -19,6 +19,7 @@ const BASE_URL = process.env["EXPO_PUBLIC_DOMAIN"]
 async function apiFetch(path: string, options?: RequestInit) {
   const token = await AsyncStorage.getItem("auth_token");
   const res = await fetch(`${BASE_URL}${path}`, {
+    cache: "no-store",
     ...options,
     headers: {
       "Content-Type": "application/json",
