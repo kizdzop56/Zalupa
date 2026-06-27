@@ -1,10 +1,9 @@
 import React, { useState, useRef, useCallback } from "react";
 import {
   View, Text, TextInput, StyleSheet, ScrollView,
-  TouchableOpacity, ActivityIndicator, Platform, Switch,
+  TouchableOpacity, ActivityIndicator, Platform, Switch, Image,
 } from "react-native";
-import { useRouter } from "expo-router";
-import { useFocusEffect } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
@@ -38,7 +37,6 @@ const TYPES = [
 type AssignmentType = typeof TYPES[number]["key"];
 
 type QuestionFormat = "open" | "choice";
-
 type QuestionDraft = {
   text: string;
   format: QuestionFormat;
@@ -48,29 +46,21 @@ type QuestionDraft = {
 };
 
 const DEFAULT_QUESTION = (): QuestionDraft => ({
-  text: "",
-  format: "open",
-  correctAnswer: "",
-  options: ["", "", ""],
-  correctIndex: 0,
+  text: "", format: "open", correctAnswer: "", options: ["", "", ""], correctIndex: 0,
 });
 
-const FRESH_STATE = () => ({
+const FRESH = () => ({
   type: "text_test" as AssignmentType,
-  title: "",
-  description: "",
-  ageMin: "5",
-  ageMax: "18",
-  points: "10",
+  title: "", description: "",
+  ageMin: "5", ageMax: "18", points: "10",
   content: "",
-  mediaUrl: "",
-  mediaInputMode: "url" as "url" | "file",
-  uploadedFileName: "",
-  timerEnabled: false,
-  timerMinutes: "30",
+  mediaUrl: "", mediaInputMode: "url" as "url" | "file", uploadedFileName: "",
+  imageUrl: "", imageInputMode: "url" as "url" | "file", uploadedImageName: "",
+  audioUrl: "", audioInputMode: "url" as "url" | "file", uploadedAudioName: "",
+  videoUrl: "", videoInputMode: "url" as "url" | "file", uploadedVideoName: "",
+  timerEnabled: false, timerMinutes: "30",
   questions: [DEFAULT_QUESTION()],
-  formError: "",
-  success: false,
+  formError: "", success: false,
 });
 
 export default function CreateAssignmentScreen() {
@@ -78,79 +68,104 @@ export default function CreateAssignmentScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
 
-  const [state, setState] = useState(FRESH_STATE());
-  const [uploading, setUploading] = useState(false);
+  const [st, setSt] = useState(FRESH());
+  const [uploading, setUploading] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<any>(null);
+  const imageInputRef = useRef<any>(null);
+  const audioInputRef = useRef<any>(null);
+  const videoInputRef = useRef<any>(null);
 
-  const set = <K extends keyof ReturnType<typeof FRESH_STATE>>(k: K, v: ReturnType<typeof FRESH_STATE>[K]) =>
-    setState(prev => ({ ...prev, [k]: v }));
+  const set = <K extends keyof ReturnType<typeof FRESH>>(k: K, v: ReturnType<typeof FRESH>[K]) =>
+    setSt(prev => ({ ...prev, [k]: v }));
 
-  // Reset all state every time the screen comes into focus
   useFocusEffect(useCallback(() => {
-    setState(FRESH_STATE());
-    setUploading(false);
-    setSaving(false);
+    setSt(FRESH()); setUploading(null); setSaving(false);
   }, []));
 
-  const { type, title, description, ageMin, ageMax, points, content, mediaUrl,
-    mediaInputMode, uploadedFileName, timerEnabled, timerMinutes,
-    questions, formError, success } = state;
+  const { type, title, description, ageMin, ageMax, points, content,
+    mediaUrl, mediaInputMode, uploadedFileName,
+    imageUrl, imageInputMode, uploadedImageName,
+    audioUrl, audioInputMode, uploadedAudioName,
+    videoUrl, videoInputMode, uploadedVideoName,
+    timerEnabled, timerMinutes, questions, formError, success } = st;
 
   // ── Question helpers ────────────────────────────────────────────────
-  const addQuestion = () => setState(p => ({ ...p, questions: [...p.questions, DEFAULT_QUESTION()] }));
-  const removeQuestion = (i: number) =>
-    setState(p => ({ ...p, questions: p.questions.filter((_, idx) => idx !== i) }));
+  const addQuestion = () => setSt(p => ({ ...p, questions: [...p.questions, DEFAULT_QUESTION()] }));
+  const removeQuestion = (i: number) => setSt(p => ({ ...p, questions: p.questions.filter((_, idx) => idx !== i) }));
   const updateQ = <K extends keyof QuestionDraft>(i: number, key: K, val: QuestionDraft[K]) =>
-    setState(p => ({ ...p, questions: p.questions.map((q, idx) => idx === i ? { ...q, [key]: val } : q) }));
+    setSt(p => ({ ...p, questions: p.questions.map((q, idx) => idx === i ? { ...q, [key]: val } : q) }));
   const updateOption = (qi: number, oi: number, val: string) =>
-    setState(p => ({ ...p, questions: p.questions.map((q, idx) =>
-      idx === qi ? { ...q, options: q.options.map((o, j) => j === oi ? val : o) } : q
-    )}));
+    setSt(p => ({ ...p, questions: p.questions.map((q, idx) =>
+      idx === qi ? { ...q, options: q.options.map((o, j) => j === oi ? val : o) } : q) }));
   const addOption = (qi: number) =>
-    setState(p => ({ ...p, questions: p.questions.map((q, idx) =>
-      idx === qi && q.options.length < 6 ? { ...q, options: [...q.options, ""] } : q
-    )}));
+    setSt(p => ({ ...p, questions: p.questions.map((q, idx) =>
+      idx === qi && q.options.length < 6 ? { ...q, options: [...q.options, ""] } : q) }));
   const removeOption = (qi: number, oi: number) =>
-    setState(p => ({ ...p, questions: p.questions.map((q, idx) => {
+    setSt(p => ({ ...p, questions: p.questions.map((q, idx) => {
       if (idx !== qi || q.options.length <= 2) return q;
       const next = q.options.filter((_, j) => j !== oi);
-      const newCorrectIdx = q.correctIndex >= next.length ? next.length - 1 : q.correctIndex;
-      return { ...q, options: next, correctIndex: newCorrectIdx };
-    })}));
+      return { ...q, options: next, correctIndex: q.correctIndex >= next.length ? next.length - 1 : q.correctIndex };
+    }) }));
+
+  // ── File upload ─────────────────────────────────────────────────────
+  const handleUpload = async (file: File, kind: "audio" | "video" | "image") => {
+    setUploading(kind);
+    set("formError" as any, "");
+    try {
+      const token = await AsyncStorage.getItem("auth_token");
+      const form = new FormData();
+      form.append("file", file);
+      const endpoint = kind === "audio" ? "/api/upload/audio" : kind === "video" ? "/api/upload/video" : "/api/upload/image";
+      const res = await fetch(`${BASE}${endpoint}`, {
+        method: "POST", headers: { Authorization: `Bearer ${token ?? ""}` }, body: form,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Ошибка загрузки");
+      if (kind === "audio") setSt(p => ({ ...p, audioUrl: data.url, uploadedAudioName: file.name }));
+      else if (kind === "video") setSt(p => ({ ...p, videoUrl: data.url, uploadedVideoName: file.name }));
+      else setSt(p => ({ ...p, imageUrl: data.url, uploadedImageName: file.name }));
+    } catch (e: any) {
+      set("formError" as any, e.message);
+    } finally {
+      setUploading(null);
+    }
+  };
 
   // ── Submit ──────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     set("formError", "");
-
     if (!title.trim()) { set("formError", "Введите название задания"); return; }
     if (!description.trim()) { set("formError", "Введите описание задания"); return; }
-
     const ageMinNum = parseInt(ageMin, 10);
     const ageMaxNum = parseInt(ageMax, 10);
-    if (isNaN(ageMinNum) || ageMinNum < 1 || ageMinNum > 100) { set("formError", "Возраст «от» введён некорректно (1–100)"); return; }
-    if (isNaN(ageMaxNum) || ageMaxNum < 1 || ageMaxNum > 100) { set("formError", "Возраст «до» введён некорректно (1–100)"); return; }
-    if (ageMinNum > ageMaxNum) { set("formError", "Возраст «от» не может быть больше возраста «до»"); return; }
-
+    if (isNaN(ageMinNum) || ageMinNum < 1) { set("formError", "Возраст «от» некорректен"); return; }
+    if (isNaN(ageMaxNum) || ageMaxNum < 1) { set("formError", "Возраст «до» некорректен"); return; }
+    if (ageMinNum > ageMaxNum) { set("formError", "Возраст «от» не может быть больше «до»"); return; }
     if (timerEnabled) {
       const mins = parseInt(timerMinutes, 10);
-      if (isNaN(mins) || mins < 1 || mins > 360) { set("formError", "Таймер: введите число от 1 до 360 минут"); return; }
+      if (isNaN(mins) || mins < 1 || mins > 360) { set("formError", "Таймер: введите 1–360 минут"); return; }
     }
 
     const questionPayload = questions
       .filter(q => q.text.trim())
       .map((q, i) => {
         if (q.format === "choice") {
-          const filledOptions = q.options.filter(o => o.trim());
-          if (filledOptions.length < 2) return null;
-          const correct = filledOptions[q.correctIndex] ?? filledOptions[0];
-          return { text: q.text.trim(), options: filledOptions, correctAnswer: correct.trim(), orderIndex: i };
+          const filled = q.options.filter(o => o.trim());
+          if (filled.length < 2) return null;
+          return { text: q.text.trim(), options: filled, correctAnswer: (filled[q.correctIndex] ?? filled[0]).trim(), orderIndex: i };
         }
         return { text: q.text.trim(), options: [] as string[], correctAnswer: q.correctAnswer.trim(), orderIndex: i };
       })
       .filter(Boolean);
 
-    const finalMediaUrl = (type === "audio" || type === "video") ? mediaUrl.trim() || undefined : undefined;
+    // Determine mediaUrl for audio/video types
+    const finalMediaUrl = type === "audio" ? (audioUrl.trim() || mediaUrl.trim() || undefined)
+      : type === "video" ? (videoUrl.trim() || mediaUrl.trim() || undefined)
+      : undefined;
+    // For reading/text_test: optional supplementary audio/video
+    const suppAudio = (type === "reading" || type === "text_test") ? audioUrl.trim() || undefined : undefined;
+    const suppVideo = (type === "reading" || type === "text_test") ? videoUrl.trim() || undefined : undefined;
     const finalContent = type === "reading" ? content.trim() || undefined : undefined;
 
     setSaving(true);
@@ -165,7 +180,8 @@ export default function CreateAssignmentScreen() {
           ageMax: ageMaxNum,
           points: parseInt(points) || 10,
           content: finalContent,
-          mediaUrl: finalMediaUrl,
+          mediaUrl: finalMediaUrl ?? suppAudio ?? suppVideo ?? undefined,
+          imageUrl: imageUrl.trim() || undefined,
           questions: questionPayload,
           timeLimitMinutes: timerEnabled ? parseInt(timerMinutes, 10) : null,
         }),
@@ -176,29 +192,6 @@ export default function CreateAssignmentScreen() {
       set("formError", e?.message ?? "Не удалось создать задание");
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleFileUpload = async (file: File) => {
-    setUploading(true);
-    set("formError", "");
-    try {
-      const token = await AsyncStorage.getItem("auth_token");
-      const form = new FormData();
-      form.append("file", file);
-      const endpoint = type === "audio" ? "/api/upload/audio" : "/api/upload/video";
-      const res = await fetch(`${BASE}${endpoint}`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token ?? ""}` },
-        body: form,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Ошибка загрузки");
-      setState(p => ({ ...p, mediaUrl: data.url, uploadedFileName: file.name }));
-    } catch (e: any) {
-      set("formError", e.message);
-    } finally {
-      setUploading(false);
     }
   };
 
@@ -241,16 +234,6 @@ export default function CreateAssignmentScreen() {
       backgroundColor: colors.card, borderRadius: 14, padding: 14,
       borderWidth: 1, borderColor: colors.border, marginBottom: 12,
     },
-    timerLeft: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
-    timerIcon: {
-      width: 36, height: 36, borderRadius: 10,
-      backgroundColor: "#f59e0b20", justifyContent: "center", alignItems: "center",
-    },
-    timerInputRow: {
-      flexDirection: "row", alignItems: "center", gap: 10,
-      backgroundColor: colors.card, borderRadius: 14, padding: 14,
-      borderWidth: 1, borderColor: "#f59e0b40", marginBottom: 12,
-    },
     timerInput: {
       backgroundColor: colors.background, borderWidth: 1.5, borderColor: "#f59e0b",
       borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10,
@@ -258,14 +241,31 @@ export default function CreateAssignmentScreen() {
       width: 80, textAlign: "center",
       ...(Platform.OS === "web" ? { outlineWidth: 0, outlineStyle: "none" } as any : {}),
     },
+    mediaToggle: { flexDirection: "row", gap: 8, marginBottom: 14 },
+    mediaBtn: {
+      flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
+      gap: 5, paddingVertical: 8, borderRadius: 10, borderWidth: 1.5,
+    },
+    mediaBtnText: { fontSize: 13, fontWeight: "600" },
+    uploadArea: {
+      flexDirection: "row", alignItems: "center", justifyContent: "center",
+      gap: 8, paddingVertical: 16, borderRadius: 12,
+      borderWidth: 1.5, borderStyle: "dashed",
+    },
+    uploadedRow: {
+      flexDirection: "row", alignItems: "center", gap: 10,
+      backgroundColor: "#f0fdf4", borderWidth: 1, borderColor: "#86efac",
+      borderRadius: 12, padding: 12, marginBottom: 8,
+    },
+    imagePreview: {
+      width: "100%", height: 160, borderRadius: 12,
+      backgroundColor: colors.muted, marginBottom: 8,
+    },
     questionCard: {
       backgroundColor: colors.card, borderRadius: 16, padding: 14,
       borderWidth: 1, borderColor: colors.border, marginBottom: 12,
     },
-    questionHeader: {
-      flexDirection: "row", alignItems: "center",
-      justifyContent: "space-between", marginBottom: 10,
-    },
+    questionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
     questionNum: { fontSize: 13, fontWeight: "700", color: colors.primary },
     formatRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
     formatBtn: {
@@ -290,18 +290,99 @@ export default function CreateAssignmentScreen() {
       paddingVertical: 12, borderRadius: 12, borderWidth: 1.5,
       borderColor: colors.border, borderStyle: "dashed",
     },
-    addQBtnText: { fontSize: 14, fontWeight: "600", color: colors.mutedForeground },
     submitBtn: {
       backgroundColor: colors.primary, borderRadius: 14,
       paddingVertical: 16, alignItems: "center", marginTop: 8,
       flexDirection: "row", justifyContent: "center", gap: 8,
     },
     submitText: { fontSize: 16, fontWeight: "700", color: "#fff" },
-    successBanner: {
-      backgroundColor: "#f0fdf4", borderRadius: 14, padding: 16,
-      alignItems: "center", gap: 8, borderWidth: 1.5, borderColor: "#86efac", marginTop: 8,
-    },
   });
+
+  // ── Media sub-section helper ────────────────────────────────────────
+  const renderMediaSection = (
+    kind: "audio" | "video" | "image",
+    urlVal: string, setUrl: (v: string) => void,
+    modeVal: "url" | "file", setMode: (v: "url" | "file") => void,
+    uploadedName: string, clearUploaded: () => void,
+    inputRef: React.RefObject<any>,
+    accentColor: string,
+    iconName: string,
+    sectionLabel: string,
+    urlPlaceholder: string,
+    acceptMime: string,
+  ) => (
+    <View style={s.section}>
+      <Text style={s.sectionTitle}>{sectionLabel}</Text>
+      <View style={s.mediaToggle}>
+        {(["url", "file"] as const).map(mode => {
+          const active = modeVal === mode;
+          return (
+            <TouchableOpacity key={mode}
+              style={[s.mediaBtn, { borderColor: active ? accentColor : colors.border, backgroundColor: active ? accentColor + "12" : colors.background }]}
+              onPress={() => setMode(mode)}
+            >
+              <Feather name={mode === "url" ? "link" : "upload"} size={14} color={active ? accentColor : colors.mutedForeground} />
+              <Text style={[s.mediaBtnText, { color: active ? accentColor : colors.mutedForeground }]}>
+                {mode === "url" ? "По ссылке" : "Загрузить файл"}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {modeVal === "url" ? (
+        <TextInput
+          style={s.input} value={urlVal} onChangeText={setUrl}
+          placeholder={urlPlaceholder} placeholderTextColor={colors.mutedForeground}
+          autoCapitalize="none" keyboardType="url"
+        />
+      ) : (
+        <>
+          {uploadedName ? (
+            <View style={s.uploadedRow}>
+              <Feather name="check-circle" size={16} color={colors.success} />
+              <Text style={{ flex: 1, fontSize: 13, color: colors.success, fontWeight: "600" }}>{uploadedName}</Text>
+              <TouchableOpacity onPress={clearUploaded}>
+                <Feather name="x" size={16} color={colors.success} />
+              </TouchableOpacity>
+            </View>
+          ) : null}
+
+          {/* Image preview */}
+          {kind === "image" && urlVal ? (
+            <Image source={{ uri: urlVal }} style={s.imagePreview} resizeMode="cover" />
+          ) : null}
+
+          {Platform.OS === "web" ? (
+            <>
+              {/* @ts-ignore */}
+              <input type="file" accept={acceptMime} style={{ display: "none" }} ref={inputRef}
+                onChange={(e: any) => { const f = e.target.files?.[0]; if (f) handleUpload(f, kind); }} />
+              <TouchableOpacity
+                style={[s.uploadArea, { borderColor: accentColor, paddingVertical: 18 }]}
+                onPress={() => inputRef.current?.click()}
+                disabled={uploading === kind}
+              >
+                {uploading === kind
+                  ? <ActivityIndicator size="small" color={accentColor} />
+                  : <Feather name={iconName as any} size={20} color={accentColor} />
+                }
+                <Text style={{ fontSize: 14, fontWeight: "600", color: accentColor }}>
+                  {uploading === kind ? "Загрузка…" : `Выбрать файл`}
+                </Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <TextInput
+              style={s.input} value={urlVal} onChangeText={setUrl}
+              placeholder={urlPlaceholder} placeholderTextColor={colors.mutedForeground}
+              autoCapitalize="none" keyboardType="url"
+            />
+          )}
+        </>
+      )}
+    </View>
+  );
 
   if (success) {
     return (
@@ -339,8 +420,7 @@ export default function CreateAssignmentScreen() {
           <Text style={s.sectionTitle}>Тип задания</Text>
           <View style={s.typeGrid}>
             {TYPES.map((t) => (
-              <TouchableOpacity
-                key={t.key}
+              <TouchableOpacity key={t.key}
                 style={[s.typeBtn, type === t.key && s.typeBtnActive]}
                 onPress={() => set("type", t.key)}
               >
@@ -354,22 +434,12 @@ export default function CreateAssignmentScreen() {
         {/* Основная информация */}
         <View style={s.section}>
           <Text style={s.sectionTitle}>Основная информация</Text>
-
           <Text style={s.label}>Название</Text>
-          <TextInput
-            style={s.input} value={title} onChangeText={v => set("title", v)}
-            placeholder="Например: Глаголы прошедшего времени"
-            placeholderTextColor={colors.mutedForeground}
-          />
-
+          <TextInput style={s.input} value={title} onChangeText={v => set("title", v)}
+            placeholder="Например: Глаголы прошедшего времени" placeholderTextColor={colors.mutedForeground} />
           <Text style={s.label}>Описание</Text>
-          <TextInput
-            style={[s.input, s.textArea]} value={description} onChangeText={v => set("description", v)}
-            placeholder="Краткое описание задания для ученика"
-            placeholderTextColor={colors.mutedForeground}
-            multiline
-          />
-
+          <TextInput style={[s.input, s.textArea]} value={description} onChangeText={v => set("description", v)}
+            placeholder="Краткое описание задания для ученика" placeholderTextColor={colors.mutedForeground} multiline />
           <View style={s.row}>
             <View style={s.half}>
               <Text style={s.label}>Возраст от</Text>
@@ -380,22 +450,17 @@ export default function CreateAssignmentScreen() {
               <TextInput style={s.input} value={ageMax} onChangeText={v => set("ageMax", v)} keyboardType="numeric" placeholder="18" placeholderTextColor={colors.mutedForeground} />
             </View>
           </View>
-
           <Text style={s.label}>Баллы за выполнение</Text>
-          <TextInput
-            style={s.input} value={points} onChangeText={v => set("points", v)}
-            keyboardType="numeric" placeholder="10"
-            placeholderTextColor={colors.mutedForeground}
-          />
+          <TextInput style={s.input} value={points} onChangeText={v => set("points", v)}
+            keyboardType="numeric" placeholder="10" placeholderTextColor={colors.mutedForeground} />
         </View>
 
         {/* Таймер */}
         <View style={s.section}>
           <Text style={s.sectionTitle}>Таймер</Text>
-
           <View style={s.timerRow}>
-            <View style={s.timerLeft}>
-              <View style={s.timerIcon}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flex: 1 }}>
+              <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: "#f59e0b20", justifyContent: "center", alignItems: "center" }}>
                 <Feather name="clock" size={18} color="#f59e0b" />
               </View>
               <View>
@@ -405,154 +470,77 @@ export default function CreateAssignmentScreen() {
                 </Text>
               </View>
             </View>
-            <Switch
-              value={timerEnabled}
-              onValueChange={v => set("timerEnabled", v)}
-              trackColor={{ false: colors.border, true: "#f59e0b" }}
-              thumbColor="#fff"
-            />
+            <Switch value={timerEnabled} onValueChange={v => set("timerEnabled", v)}
+              trackColor={{ false: colors.border, true: "#f59e0b" }} thumbColor="#fff" />
           </View>
-
           {timerEnabled && (
-            <View style={s.timerInputRow}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10,
+              backgroundColor: colors.card, borderRadius: 14, padding: 14,
+              borderWidth: 1, borderColor: "#f59e0b40", marginBottom: 12 }}>
               <Feather name="clock" size={16} color="#f59e0b" />
               <Text style={{ fontSize: 14, color: colors.foreground, fontWeight: "600" }}>Время:</Text>
-              <TextInput
-                style={s.timerInput}
-                value={timerMinutes}
+              <TextInput style={s.timerInput} value={timerMinutes}
                 onChangeText={v => set("timerMinutes", v.replace(/[^0-9]/g, ""))}
-                keyboardType="numeric"
-                maxLength={3}
-                placeholderTextColor={colors.mutedForeground}
-              />
+                keyboardType="numeric" maxLength={3} placeholderTextColor={colors.mutedForeground} />
               <Text style={{ fontSize: 14, color: colors.foreground, fontWeight: "600" }}>мин</Text>
               <Text style={{ fontSize: 12, color: colors.mutedForeground, flex: 1 }}>(1–360)</Text>
             </View>
           )}
         </View>
 
-        {/* Контент (чтение / аудио / видео) */}
+        {/* Изображение — для всех типов */}
+        {renderMediaSection(
+          "image",
+          imageUrl, v => set("imageUrl", v),
+          imageInputMode, v => set("imageInputMode", v),
+          uploadedImageName, () => setSt(p => ({ ...p, imageUrl: "", uploadedImageName: "" })),
+          imageInputRef,
+          "#8b5cf6", "image", "Изображение (необязательно)",
+          "https://example.com/image.jpg",
+          "image/*",
+        )}
+
+        {/* Аудио — для всех типов */}
+        {renderMediaSection(
+          "audio",
+          audioUrl, v => set("audioUrl", v),
+          audioInputMode, v => set("audioInputMode", v),
+          uploadedAudioName, () => setSt(p => ({ ...p, audioUrl: "", uploadedAudioName: "" })),
+          audioInputRef,
+          "#06b6d4", "headphones", "Аудио (необязательно)",
+          "https://example.com/audio.mp3",
+          "audio/*",
+        )}
+
+        {/* Видео — для всех типов */}
+        {renderMediaSection(
+          "video",
+          videoUrl, v => set("videoUrl", v),
+          videoInputMode, v => set("videoInputMode", v),
+          uploadedVideoName, () => setSt(p => ({ ...p, videoUrl: "", uploadedVideoName: "" })),
+          videoInputRef,
+          "#f59e0b", "video", "Видео (необязательно)",
+          "https://youtube.com/watch?v=... или https://example.com/video.mp4",
+          "video/*",
+        )}
+
+        {/* Текст для чтения */}
         {type === "reading" && (
           <View style={s.section}>
-            <Text style={s.sectionTitle}>Контент</Text>
-            <Text style={s.label}>Текст для чтения</Text>
+            <Text style={s.sectionTitle}>Текст для чтения</Text>
             <TextInput
               style={[s.input, s.textArea]}
               value={content} onChangeText={v => set("content", v)}
-              placeholder="Вставьте текст для чтения..."
+              placeholder="Вставьте текст для чтения…"
               placeholderTextColor={colors.mutedForeground}
               multiline
             />
           </View>
         )}
 
-        {(type === "audio" || type === "video") && (
-          <View style={s.section}>
-            <Text style={s.sectionTitle}>Медиафайл</Text>
-
-            <View style={{ flexDirection: "row", gap: 8, marginBottom: 14 }}>
-              {(["url", "file"] as const).map((mode) => {
-                const active = mediaInputMode === mode;
-                return (
-                  <TouchableOpacity
-                    key={mode}
-                    style={[s.formatBtn, {
-                      borderColor: active ? colors.primary : colors.border,
-                      backgroundColor: active ? colors.primary + "12" : colors.background,
-                      flex: 1,
-                    }]}
-                    onPress={() => set("mediaInputMode", mode)}
-                  >
-                    <Feather name={mode === "url" ? "link" : "upload"} size={14} color={active ? colors.primary : colors.mutedForeground} />
-                    <Text style={[s.formatBtnText, { color: active ? colors.primary : colors.mutedForeground }]}>
-                      {mode === "url" ? "По ссылке" : "Загрузить файл"}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            {mediaInputMode === "url" ? (
-              <>
-                <Text style={s.label}>{type === "audio" ? "Ссылка на аудио" : "Ссылка на видео"}</Text>
-                <TextInput
-                  style={s.input}
-                  value={mediaUrl} onChangeText={v => set("mediaUrl", v)}
-                  placeholder={type === "audio" ? "https://example.com/audio.mp3" : "https://youtube.com/watch?v=..."}
-                  placeholderTextColor={colors.mutedForeground}
-                  autoCapitalize="none"
-                  keyboardType="url"
-                />
-              </>
-            ) : (
-              <>
-                <Text style={s.label}>{type === "audio" ? "Аудиофайл (MP3, M4A, WAV)" : "Видеофайл (MP4, MOV)"}</Text>
-
-                {uploadedFileName ? (
-                  <View style={{
-                    flexDirection: "row", alignItems: "center", gap: 10,
-                    backgroundColor: "#f0fdf4", borderWidth: 1, borderColor: "#86efac",
-                    borderRadius: 12, padding: 12, marginBottom: 8,
-                  }}>
-                    <Feather name="check-circle" size={16} color={colors.success} />
-                    <Text style={{ flex: 1, fontSize: 13, color: colors.success, fontWeight: "600" }}>{uploadedFileName}</Text>
-                    <TouchableOpacity onPress={() => setState(p => ({ ...p, mediaUrl: "", uploadedFileName: "" }))}>
-                      <Feather name="x" size={16} color={colors.success} />
-                    </TouchableOpacity>
-                  </View>
-                ) : null}
-
-                {Platform.OS === "web" ? (
-                  <>
-                    {/* @ts-ignore */}
-                    <input
-                      type="file"
-                      accept={type === "audio" ? "audio/*" : "video/*"}
-                      style={{ display: "none" }}
-                      ref={fileInputRef}
-                      onChange={(e: any) => {
-                        const file = e.target.files?.[0];
-                        if (file) handleFileUpload(file);
-                      }}
-                    />
-                    <TouchableOpacity
-                      style={[s.addOptBtn, { paddingVertical: 16, borderColor: colors.primary, borderStyle: "dashed" }]}
-                      onPress={() => fileInputRef.current?.click()}
-                      disabled={uploading}
-                    >
-                      {uploading
-                        ? <ActivityIndicator size="small" color={colors.primary} />
-                        : <Feather name="upload" size={18} color={colors.primary} />
-                      }
-                      <Text style={{ fontSize: 14, fontWeight: "600", color: colors.primary }}>
-                        {uploading ? "Загрузка..." : `Выбрать ${type === "audio" ? "аудио" : "видео"}`}
-                      </Text>
-                    </TouchableOpacity>
-                  </>
-                ) : (
-                  <>
-                    <Text style={{ fontSize: 12, color: colors.mutedForeground, marginBottom: 8 }}>
-                      На мобильных устройствах используйте ссылку:
-                    </Text>
-                    <TextInput
-                      style={s.input}
-                      value={mediaUrl} onChangeText={v => set("mediaUrl", v)}
-                      placeholder={type === "audio" ? "https://example.com/audio.mp3" : "https://youtube.com/watch?v=..."}
-                      placeholderTextColor={colors.mutedForeground}
-                      autoCapitalize="none"
-                      keyboardType="url"
-                    />
-                  </>
-                )}
-              </>
-            )}
-          </View>
-        )}
-
         {/* Вопросы */}
         <View style={s.section}>
           <Text style={s.sectionTitle}>Вопросы</Text>
-
           {questions.map((q, qi) => (
             <View key={qi} style={s.questionCard}>
               <View style={s.questionHeader}>
@@ -563,26 +551,17 @@ export default function CreateAssignmentScreen() {
                   </TouchableOpacity>
                 )}
               </View>
-
               <TextInput
                 style={[s.input, s.textArea, { minHeight: 60 }]}
-                value={q.text}
-                onChangeText={v => updateQ(qi, "text", v)}
-                placeholder="Текст вопроса"
-                placeholderTextColor={colors.mutedForeground}
-                multiline
+                value={q.text} onChangeText={v => updateQ(qi, "text", v)}
+                placeholder="Текст вопроса" placeholderTextColor={colors.mutedForeground} multiline
               />
-
               <View style={s.formatRow}>
-                {(["open", "choice"] as QuestionFormat[]).map((fmt) => {
+                {(["open", "choice"] as QuestionFormat[]).map(fmt => {
                   const active = q.format === fmt;
                   return (
-                    <TouchableOpacity
-                      key={fmt}
-                      style={[s.formatBtn, {
-                        borderColor: active ? colors.primary : colors.border,
-                        backgroundColor: active ? colors.primary + "12" : colors.background,
-                      }]}
+                    <TouchableOpacity key={fmt}
+                      style={[s.formatBtn, { borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.primary + "12" : colors.background }]}
                       onPress={() => updateQ(qi, "format", fmt)}
                     >
                       <Feather name={fmt === "open" ? "edit-2" : "list"} size={14} color={active ? colors.primary : colors.mutedForeground} />
@@ -593,39 +572,26 @@ export default function CreateAssignmentScreen() {
                   );
                 })}
               </View>
-
               {q.format === "open" && (
-                <TextInput
-                  style={s.input}
-                  value={q.correctAnswer}
+                <TextInput style={s.input} value={q.correctAnswer}
                   onChangeText={v => updateQ(qi, "correctAnswer", v)}
-                  placeholder="Правильный ответ"
-                  placeholderTextColor={colors.mutedForeground}
-                />
+                  placeholder="Правильный ответ" placeholderTextColor={colors.mutedForeground} />
               )}
-
               {q.format === "choice" && (
                 <View>
                   {q.options.map((opt, oi) => (
                     <View key={oi} style={s.optionRow}>
                       <TouchableOpacity
-                        style={[{
-                          width: 22, height: 22, borderRadius: 11, borderWidth: 2,
-                          justifyContent: "center", alignItems: "center",
+                        style={{ width: 22, height: 22, borderRadius: 11, borderWidth: 2, justifyContent: "center", alignItems: "center",
                           borderColor: q.correctIndex === oi ? colors.primary : colors.border,
-                          backgroundColor: q.correctIndex === oi ? colors.primary : "transparent",
-                        }]}
+                          backgroundColor: q.correctIndex === oi ? colors.primary : "transparent" }}
                         onPress={() => updateQ(qi, "correctIndex", oi)}
                       >
                         {q.correctIndex === oi && <Feather name="check" size={13} color="#fff" />}
                       </TouchableOpacity>
-                      <TextInput
-                        style={s.optionInput}
-                        value={opt}
+                      <TextInput style={s.optionInput} value={opt}
                         onChangeText={v => updateOption(qi, oi, v)}
-                        placeholder={`Вариант ${oi + 1}`}
-                        placeholderTextColor={colors.mutedForeground}
-                      />
+                        placeholder={`Вариант ${oi + 1}`} placeholderTextColor={colors.mutedForeground} />
                       {q.options.length > 2 && (
                         <TouchableOpacity onPress={() => removeOption(qi, oi)}>
                           <Feather name="x" size={16} color={colors.destructive} />
@@ -643,27 +609,20 @@ export default function CreateAssignmentScreen() {
               )}
             </View>
           ))}
-
           <TouchableOpacity style={s.addQBtn} onPress={addQuestion}>
             <Feather name="plus" size={16} color={colors.mutedForeground} />
-            <Text style={s.addQBtnText}>Добавить вопрос</Text>
+            <Text style={{ fontSize: 14, fontWeight: "600", color: colors.mutedForeground }}>Добавить вопрос</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Ошибки и кнопка */}
         {!!formError && (
           <View style={{ backgroundColor: "#fef2f2", borderRadius: 12, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: "#fca5a5" }}>
             <Text style={{ color: colors.destructive, fontSize: 14, fontWeight: "600" }}>{formError}</Text>
           </View>
         )}
-
         <TouchableOpacity style={s.submitBtn} onPress={handleSubmit} disabled={saving}>
-          {saving
-            ? <ActivityIndicator color="#fff" />
-            : <>
-                <Feather name="check" size={18} color="#fff" />
-                <Text style={s.submitText}>Создать задание</Text>
-              </>
+          {saving ? <ActivityIndicator color="#fff" />
+            : <><Feather name="check" size={18} color="#fff" /><Text style={s.submitText}>Создать задание</Text></>
           }
         </TouchableOpacity>
 

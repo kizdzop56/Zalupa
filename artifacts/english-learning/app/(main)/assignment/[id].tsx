@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Platform, Alert, TextInput, Linking,
+  ActivityIndicator, Platform, Alert, TextInput, Linking, Image,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
@@ -48,6 +48,7 @@ type AssignmentDetail = {
   ageMax: number;
   content: string | null;
   mediaUrl: string | null;
+  imageUrl: string | null;
   isDraft: boolean;
   timeLimitMinutes: number | null;
   questions: Question[];
@@ -292,6 +293,14 @@ export default function AssignmentDetailScreen() {
   const typeColor = TYPE_COLORS[assignment.type] || colors.primary;
   const mediaUrl = assignment.mediaUrl || (assignment.type !== "reading" ? assignment.content : null);
   const textContent = assignment.type === "reading" ? assignment.content : null;
+  const imageUrl = assignment.imageUrl;
+
+  // Detect what kind of media the URL is
+  const isAudioUrl = (url: string) => /\.(mp3|m4a|wav|ogg|aac)(\?|$)/i.test(url) || url.includes("/upload/audio");
+  const isVideoUrl = (url: string) => url.includes("youtube") || url.includes("youtu.be") || /\.(mp4|mov|webm|avi)(\?|$)/i.test(url) || url.includes("/upload/video");
+
+  const showVideoBlock = !!mediaUrl && (assignment.type === "video" || (assignment.type !== "audio" && isVideoUrl(mediaUrl)));
+  const showAudioBlock = !!mediaUrl && (assignment.type === "audio" || (!showVideoBlock && isAudioUrl(mediaUrl)));
 
   const openMedia = () => {
     if (!mediaUrl) return;
@@ -416,6 +425,17 @@ export default function AssignmentDetailScreen() {
           </View>
         )}
 
+        {/* Image */}
+        {imageUrl ? (
+          <View style={[styles.content, { padding: 0, overflow: "hidden" }]}>
+            <Image
+              source={{ uri: imageUrl }}
+              style={{ width: "100%", height: 200, borderRadius: 12 }}
+              resizeMode="cover"
+            />
+          </View>
+        ) : null}
+
         {/* Reading text */}
         {textContent && (
           <View style={styles.content}>
@@ -425,7 +445,7 @@ export default function AssignmentDetailScreen() {
         )}
 
         {/* Video */}
-        {assignment.type === "video" && mediaUrl && (
+        {showVideoBlock && (
           <View style={[styles.content, { gap: 8 }]}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
               <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: "#f59e0b20", justifyContent: "center", alignItems: "center" }}>
@@ -455,7 +475,7 @@ export default function AssignmentDetailScreen() {
         )}
 
         {/* Audio */}
-        {assignment.type === "audio" && mediaUrl && (
+        {showAudioBlock && (
           <View style={[styles.content, { gap: 8 }]}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
               <View style={{ width: 32, height: 32, borderRadius: 10, backgroundColor: "#06b6d420", justifyContent: "center", alignItems: "center" }}>

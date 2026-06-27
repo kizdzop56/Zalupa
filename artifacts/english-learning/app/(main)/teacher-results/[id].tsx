@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Platform,
+  ActivityIndicator, Platform, Alert,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
@@ -13,11 +13,17 @@ const BASE = process.env["EXPO_PUBLIC_DOMAIN"]
   ? `https://${process.env["EXPO_PUBLIC_DOMAIN"]}`
   : "";
 
-async function apiFetch(path: string) {
+async function apiFetch(path: string, options?: RequestInit) {
   const token = await AsyncStorage.getItem("auth_token");
   const res = await fetch(`${BASE}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...(options?.headers ?? {}),
+    },
   });
+  if (res.status === 204) return null;
   const data = await res.json();
   if (!res.ok) throw new Error(data.error ?? "Ошибка сервера");
   return data;
@@ -63,10 +69,12 @@ export default function TeacherResultsScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const assignmentTitle = results[0]?.assignmentTitle ?? "Задание";
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setLoading(true);
     apiFetch("/api/assignments/teacher-results")
       .then((all: ResultRow[]) => {
         const filtered = all.filter((r) => r.assignmentId === assignmentId);
@@ -76,12 +84,39 @@ export default function TeacherResultsScreen() {
       .finally(() => setLoading(false));
   }, [assignmentId]);
 
+  useEffect(() => { load(); }, [load]);
+
   const toggleExpand = (id: number) => {
     setExpanded((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+  };
+
+  const handleUnassign = (row: ResultRow) => {
+    Alert.alert(
+      "Убрать задание у ученика?",
+      `«${row.assignmentTitle}» будет удалено из списка у ${row.studentName}`,
+      [
+        { text: "Отмена", style: "cancel" },
+        {
+          text: "Удалить",
+          style: "destructive",
+          onPress: async () => {
+            setDeletingId(row.assignedTaskId);
+            try {
+              await apiFetch(`/api/assigned-tasks/${row.assignedTaskId}`, { method: "DELETE" });
+              setResults(prev => prev.filter(r => r.assignedTaskId !== row.assignedTaskId));
+            } catch (e: any) {
+              Alert.alert("Ошибка", e.message);
+            } finally {
+              setDeletingId(null);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const s = StyleSheet.create({
@@ -126,11 +161,15 @@ export default function TeacherResultsScreen() {
     },
     pendingTag: {
       backgroundColor: "#fef3c7", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4,
-      alignSelf: "flex-end",
     },
-    doneTag: {
-      borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4,
-      alignSelf: "flex-end",
+    sectionLabel: {
+      fontSize: 12, fontWeight: "700", color: colors.mutedForeground,
+      textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 10,
+    },
+    deleteBtn: {
+      width: 32, height: 32, borderRadius: 10,
+      backgroundColor: "#fef2f2", borderWidth: 1, borderColor: "#fca5a5",
+      justifyContent: "center", alignItems: "center",
     },
   });
 
@@ -149,7 +188,10 @@ export default function TeacherResultsScreen() {
   return (
     <View style={s.container}>
       <View style={s.header}>
-        <TouchableOpacity style={{ width: 36, height: 36, justifyContent: "center", alignItems: "center" }} onPress={() => router.back()}>
+        <TouchableOpacity
+          style={{ width: 36, height: 36, justifyContent: "center", alignItems: "center" }}
+          onPress={() => router.back()}
+        >
           <Feather name="arrow-left" size={22} color={colors.foreground} />
         </TouchableOpacity>
         <Text style={s.headerTitle} numberOfLines={2}>Результаты: {assignmentTitle}</Text>
@@ -195,16 +237,12 @@ export default function TeacherResultsScreen() {
           {/* Submitted */}
           {submitted.length > 0 && (
             <>
-              <Text style={{
-                fontSize: 12, fontWeight: "700", color: colors.mutedForeground,
-                textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 10,
-              }}>
-                Выполнили · {submitted.length}
-              </Text>
+              <Text style={s.sectionLabel}>Выполнили · {submitted.length}</Text>
               {submitted.map((r) => {
                 const sub = r.submission!;
                 const scoreColor = sub.score >= 70 ? "#10b981" : sub.score >= 50 ? "#f59e0b" : "#ef4444";
                 const isExpanded = expanded.has(r.assignedTaskId);
+                const isDeleting = deletingId === r.assignedTaskId;
                 return (
                   <View key={r.assignedTaskId} style={s.studentCard}>
                     <View style={s.studentRow}>
@@ -223,6 +261,16 @@ export default function TeacherResultsScreen() {
                         <Text style={[s.scoreNum, { color: scoreColor }]}>{sub.score}%</Text>
                         <Text style={s.scoreSub}>+{sub.pointsEarned} ⭐</Text>
                       </View>
+                      <TouchableOpacity
+                        style={s.deleteBtn}
+                        onPress={() => handleUnassign(r)}
+                        disabled={isDeleting}
+                      >
+                        {isDeleting
+                          ? <ActivityIndicator size="small" color="#dc2626" />
+                          : <Feather name="trash-2" size={15} color="#dc2626" />
+                        }
+                      </TouchableOpacity>
                     </View>
 
                     {r.answers.length > 0 && (
@@ -276,28 +324,37 @@ export default function TeacherResultsScreen() {
           {/* Pending */}
           {pending.length > 0 && (
             <>
-              <Text style={{
-                fontSize: 12, fontWeight: "700", color: colors.mutedForeground,
-                textTransform: "uppercase", letterSpacing: 0.6,
-                marginBottom: 10, marginTop: submitted.length > 0 ? 20 : 0,
-              }}>
+              <Text style={[s.sectionLabel, { marginTop: submitted.length > 0 ? 20 : 0 }]}>
                 Ещё не выполнили · {pending.length}
               </Text>
-              {pending.map((r) => (
-                <View key={r.assignedTaskId} style={[s.studentCard, { opacity: 0.7 }]}>
-                  <View style={s.studentRow}>
-                    <View style={[s.avatar, { backgroundColor: r.studentAvatarColor ?? "#6366f1" }]}>
-                      <Text style={{ fontSize: 22 }}>{r.studentAvatarEmoji ?? "🦁"}</Text>
-                    </View>
-                    <Text style={{ flex: 1, fontSize: 15, fontWeight: "700", color: colors.foreground }}>
-                      {r.studentName}
-                    </Text>
-                    <View style={s.pendingTag}>
-                      <Text style={{ fontSize: 12, fontWeight: "600", color: "#92400e" }}>Ожидает</Text>
+              {pending.map((r) => {
+                const isDeleting = deletingId === r.assignedTaskId;
+                return (
+                  <View key={r.assignedTaskId} style={[s.studentCard, { opacity: isDeleting ? 0.5 : 0.85 }]}>
+                    <View style={s.studentRow}>
+                      <View style={[s.avatar, { backgroundColor: r.studentAvatarColor ?? "#6366f1" }]}>
+                        <Text style={{ fontSize: 22 }}>{r.studentAvatarEmoji ?? "🦁"}</Text>
+                      </View>
+                      <Text style={{ flex: 1, fontSize: 15, fontWeight: "700", color: colors.foreground }}>
+                        {r.studentName}
+                      </Text>
+                      <View style={s.pendingTag}>
+                        <Text style={{ fontSize: 12, fontWeight: "600", color: "#92400e" }}>Ожидает</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={s.deleteBtn}
+                        onPress={() => handleUnassign(r)}
+                        disabled={isDeleting}
+                      >
+                        {isDeleting
+                          ? <ActivityIndicator size="small" color="#dc2626" />
+                          : <Feather name="trash-2" size={15} color="#dc2626" />
+                        }
+                      </TouchableOpacity>
                     </View>
                   </View>
-                </View>
-              ))}
+                );
+              })}
             </>
           )}
         </ScrollView>

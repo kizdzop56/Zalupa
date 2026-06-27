@@ -76,14 +76,8 @@ export default function MainLayout() {
           }}
         />
 
-        {/* История — только ученики */}
-        <Tabs.Screen
-          name="history"
-          options={isStudent
-            ? { title: "История", tabBarIcon: ({ color }) => <Feather name="clock" size={22} color={color} /> }
-            : { href: null }
-          }
-        />
+        {/* История — скрыта */}
+        <Tabs.Screen name="history" options={{ href: null }} />
 
         {/* AI Чат — только ученики */}
         <Tabs.Screen

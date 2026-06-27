@@ -195,7 +195,7 @@ router.post("/assignments", requireAuth, async (req, res) => {
     res.status(403).json({ error: "Forbidden" }); return;
   }
 
-  const { title, description, type, ageMin, ageMax, points, mediaUrl, content, questions, isDraft, timeLimitMinutes } = req.body;
+  const { title, description, type, ageMin, ageMax, points, mediaUrl, content, questions, isDraft, timeLimitMinutes, imageUrl } = req.body;
 
   if (!title?.trim()) { res.status(400).json({ error: "Введите название задания" }); return; }
   if (!description?.trim()) { res.status(400).json({ error: "Введите описание задания" }); return; }
@@ -214,6 +214,7 @@ router.post("/assignments", requireAuth, async (req, res) => {
     content: content?.trim() || null,
     isDraft: isDraft !== false,
     timeLimitMinutes: timeLimitMinutes ? Number(timeLimitMinutes) : null,
+    imageUrl: imageUrl?.trim() || null,
   }).returning();
 
   if (questions && questions.length > 0) {
@@ -371,6 +372,22 @@ router.patch("/assignments/:id", requireAuth, async (req, res) => {
   }
 
   res.json(updated);
+});
+
+// ── Unassign (remove assigned task from student) ──────────────────────
+router.delete("/assigned-tasks/:assignedTaskId", requireAuth, async (req, res) => {
+  const caller = getUser(req);
+  if (!isTeacher(caller.role) && caller.role !== "admin") {
+    res.status(403).json({ error: "Forbidden" }); return;
+  }
+  const assignedTaskId = Number(req.params["assignedTaskId"]);
+  await db.delete(assignedTasksTable).where(
+    and(
+      eq(assignedTasksTable.id, assignedTaskId),
+      eq(assignedTasksTable.teacherId, caller.userId),
+    )
+  );
+  res.status(204).send();
 });
 
 router.delete("/assignments/:id", requireAuth, async (req, res) => {
