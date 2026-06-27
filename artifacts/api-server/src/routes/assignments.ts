@@ -314,21 +314,50 @@ router.post("/assignments/:id/assign", requireAuth, async (req, res) => {
     res.status(400).json({ error: "Нет принятых учеников из списка" }); return;
   }
 
+  // Find students who already have this assignment (active, not yet submitted)
+  const existingTasks = await db.select({ studentId: assignedTasksTable.studentId })
+    .from(assignedTasksTable)
+    .where(and(
+      eq(assignedTasksTable.assignmentId, assignmentId),
+      inArray(assignedTasksTable.studentId, validStudentIds),
+    ));
+  const existingSet = new Set(existingTasks.map((t) => t.studentId));
+
+  // Among existing, find who already submitted
+  const submittedRows = existingSet.size > 0
+    ? await db.select({ studentId: submissionsTable.studentId })
+      .from(submissionsTable)
+      .where(and(
+        eq(submissionsTable.assignmentId, assignmentId),
+        inArray(submissionsTable.studentId, [...existingSet]),
+      ))
+    : [];
+  const submittedSet = new Set(submittedRows.map((s) => s.studentId));
+
+  // Skip students who have an active unsubmitted task
+  const skipIds = [...existingSet].filter((id) => !submittedSet.has(id));
+  const toAssignIds = validStudentIds.filter((id) => !skipIds.includes(id));
+
+  if (toAssignIds.length === 0) {
+    res.json({ ok: true, assigned: 0, skipped: skipIds.length });
+    return;
+  }
+
   await db.delete(assignedTasksTable).where(and(
     eq(assignedTasksTable.assignmentId, assignmentId),
     eq(assignedTasksTable.teacherId, caller.userId),
-    inArray(assignedTasksTable.studentId, validStudentIds),
+    inArray(assignedTasksTable.studentId, toAssignIds),
   ));
 
   await db.insert(assignedTasksTable).values(
-    validStudentIds.map((sid) => ({
+    toAssignIds.map((sid) => ({
       assignmentId,
       studentId: sid,
       teacherId: caller.userId,
     }))
   );
 
-  res.json({ ok: true, assigned: validStudentIds.length });
+  res.json({ ok: true, assigned: toAssignIds.length, skipped: skipIds.length });
 });
 
 // ── Patch assignment (teacher or admin who owns it) ───────────────────

@@ -84,12 +84,16 @@ function AssignModal({
     if (!assignment || selected.size === 0) return;
     setSending(true); setError("");
     try {
-      await apiFetch(`/api/assignments/${assignment.id}/assign`, {
+      const result = await apiFetch(`/api/assignments/${assignment.id}/assign`, {
         method: "POST",
         body: JSON.stringify({ studentIds: Array.from(selected) }),
       });
-      onDone();
-      onClose();
+      if (result.assigned > 0) {
+        onDone();
+        onClose();
+      } else {
+        setError("Все выбранные ученики уже имеют это активное задание. Оно появится снова после выполнения.");
+      }
     } catch (e: any) {
       setError(e.message);
     } finally {

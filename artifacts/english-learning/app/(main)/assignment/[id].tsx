@@ -101,6 +101,9 @@ export default function AssignmentDetailScreen() {
   const isTeacherRole = user?.role === "teacher" || user?.role === "admin";
   const isStudent = user?.role === "student";
 
+  // Keep a ref to latest answers so auto-submit captures them without closure issues
+  const answersRef = useRef<Record<number, string>>({});
+
   // Load assignment
   useEffect(() => {
     if (!assignmentId) return;
@@ -169,15 +172,18 @@ export default function AssignmentDetailScreen() {
     }
   }, [assignment, answers, assignmentId, submitting]);
 
+  // Keep answersRef in sync so auto-submit always sends the latest answers
+  useEffect(() => {
+    answersRef.current = answers;
+  }, [answers]);
+
+  // Auto-submit when timer expires (call directly — never inside setState)
   useEffect(() => {
     if (timerExpired && !submitted && !autoSubmitRef.current) {
       autoSubmitRef.current = true;
-      // Capture current answers at expiry time
-      setAnswers(prev => {
-        handleSubmit(prev);
-        return prev;
-      });
+      handleSubmit(answersRef.current);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timerExpired]);
 
   const styles = StyleSheet.create({
