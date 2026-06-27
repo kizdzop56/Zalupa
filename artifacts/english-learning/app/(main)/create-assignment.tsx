@@ -147,6 +147,11 @@ export default function CreateAssignmentScreen() {
       if (isNaN(mins) || mins < 1 || mins > 360) { set("formError", "Таймер: введите 1–360 минут"); return; }
     }
 
+    if (type === "reading" && !imageUrl.trim() && !videoUrl.trim()) {
+      set("formError", "Для задания «Чтение» необходимо прикрепить изображение или видео");
+      return;
+    }
+
     const questionPayload = questions
       .filter(q => q.text.trim())
       .map((q, i) => {
@@ -488,46 +493,49 @@ export default function CreateAssignmentScreen() {
           )}
         </View>
 
-        {/* Изображение — для всех типов */}
-        {renderMediaSection(
+        {/* Изображение — только text_test и reading */}
+        {(type === "text_test" || type === "reading") && renderMediaSection(
           "image",
           imageUrl, v => set("imageUrl", v),
           imageInputMode, v => set("imageInputMode", v),
           uploadedImageName, () => setSt(p => ({ ...p, imageUrl: "", uploadedImageName: "" })),
           imageInputRef,
-          "#8b5cf6", "image", "Изображение (необязательно)",
+          "#8b5cf6", "image",
+          type === "reading" ? "Изображение" : "Изображение (необязательно)",
           "https://example.com/image.jpg",
           "image/*",
         )}
 
-        {/* Аудио — для всех типов */}
-        {renderMediaSection(
+        {/* Аудио — только text_test и audio */}
+        {(type === "text_test" || type === "audio") && renderMediaSection(
           "audio",
           audioUrl, v => set("audioUrl", v),
           audioInputMode, v => set("audioInputMode", v),
           uploadedAudioName, () => setSt(p => ({ ...p, audioUrl: "", uploadedAudioName: "" })),
           audioInputRef,
-          "#06b6d4", "headphones", "Аудио (необязательно)",
+          "#06b6d4", "headphones",
+          type === "audio" ? "Аудио" : "Аудио (необязательно)",
           "https://example.com/audio.mp3",
           "audio/*",
         )}
 
-        {/* Видео — для всех типов */}
-        {renderMediaSection(
+        {/* Видео — только text_test, reading, video */}
+        {(type === "text_test" || type === "reading" || type === "video") && renderMediaSection(
           "video",
           videoUrl, v => set("videoUrl", v),
           videoInputMode, v => set("videoInputMode", v),
           uploadedVideoName, () => setSt(p => ({ ...p, videoUrl: "", uploadedVideoName: "" })),
           videoInputRef,
-          "#f59e0b", "video", "Видео (необязательно)",
+          "#f59e0b", "video",
+          type === "video" ? "Видео" : "Видео (необязательно)",
           "https://youtube.com/watch?v=... или https://example.com/video.mp4",
           "video/*",
         )}
 
-        {/* Текст для чтения */}
+        {/* Текст для чтения — необязательный */}
         {type === "reading" && (
           <View style={s.section}>
-            <Text style={s.sectionTitle}>Текст для чтения</Text>
+            <Text style={s.sectionTitle}>Текст для чтения (необязательно)</Text>
             <TextInput
               style={[s.input, s.textArea]}
               value={content} onChangeText={v => set("content", v)}
