@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import {
-  usersTable, teacherStudentsTable, parentChildrenTable, friendshipsTable, submissionsTable,
+  usersTable, teacherStudentsTable, parentChildrenTable, friendshipsTable, submissionsTable, assignedTasksTable,
 } from "@workspace/db";
 import { eq, and, or, inArray } from "drizzle-orm";
 import { requireAuth, getUser, isTeacher } from "../lib/auth";
@@ -148,10 +148,20 @@ router.delete("/connections/teacher/students/:studentId", requireAuth, async (re
   const caller = getUser(req);
   if (!isTeacher(caller.role)) { res.status(403).json({ error: "Forbidden" }); return; }
 
+  const studentId = Number(req.params["studentId"]);
+
+  // Remove the connection
   await db.delete(teacherStudentsTable).where(and(
     eq(teacherStudentsTable.teacherId, caller.userId),
-    eq(teacherStudentsTable.studentId, Number(req.params["studentId"])),
+    eq(teacherStudentsTable.studentId, studentId),
   ));
+
+  // Also remove all assigned tasks from this teacher to this student so student's list is clean
+  await db.delete(assignedTasksTable).where(and(
+    eq(assignedTasksTable.teacherId, caller.userId),
+    eq(assignedTasksTable.studentId, studentId),
+  ));
+
   res.json({ ok: true });
 });
 

@@ -147,15 +147,45 @@ export default function CreateAssignmentScreen() {
       if (isNaN(mins) || mins < 1 || mins > 360) { set("formError", "Таймер: введите 1–360 минут"); return; }
     }
 
+    // ── Media validation by type ───────────────────────────────────────
+    if (type === "video") {
+      const hasVideoUrl = videoUrl.trim() !== "";
+      const hasVideoFile = uploadedVideoName !== "";
+      if (!hasVideoUrl && !hasVideoFile) {
+        set("formError", "Для задания «Видео» необходимо прикрепить видео или ссылку на него");
+        return;
+      }
+      if (hasVideoUrl && hasVideoFile) {
+        set("formError", "Нельзя одновременно указать ссылку и загрузить файл — выберите одно");
+        return;
+      }
+    }
+
+    if (type === "audio") {
+      const hasAudioUrl = audioUrl.trim() !== "";
+      const hasAudioFile = uploadedAudioName !== "";
+      if (!hasAudioUrl && !hasAudioFile) {
+        set("formError", "Для задания «Аудирование» необходимо прикрепить аудио или ссылку на него");
+        return;
+      }
+      if (hasAudioUrl && hasAudioFile) {
+        set("formError", "Нельзя одновременно указать ссылку и загрузить файл — выберите одно");
+        return;
+      }
+    }
+
     if (type === "reading" && !imageUrl.trim() && !videoUrl.trim()) {
       set("formError", "Для задания «Чтение» необходимо прикрепить изображение или видео");
       return;
     }
 
-    // Validate questions that have text filled in
+    // ── Question validation — every added question must be fully filled ─
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i];
-      if (!q.text.trim()) continue;
+      if (!q.text.trim()) {
+        set("formError", `Вопрос ${i + 1}: введите текст вопроса`);
+        return;
+      }
       if (q.format === "open") {
         if (!q.correctAnswer.trim()) {
           set("formError", `Вопрос ${i + 1}: введите правильный ответ`);

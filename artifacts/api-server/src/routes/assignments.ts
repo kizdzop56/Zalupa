@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { assignmentsTable, questionsTable, assignedTasksTable, submissionsTable, submissionAnswersTable, usersTable, teacherStudentsTable } from "@workspace/db";
-import { eq, and, gte, lte, inArray, or, desc } from "drizzle-orm";
+import { eq, and, gte, lte, inArray, or, desc, sql } from "drizzle-orm";
 import { requireAuth, getUser, requireRole, isTeacher } from "../lib/auth";
 
 const router = Router();
@@ -395,10 +395,25 @@ router.delete("/assignments/:id", requireAuth, async (req, res) => {
   if (!isTeacher(caller.role) && caller.role !== "admin") {
     res.status(403).json({ error: "Forbidden" }); return;
   }
-  await db.delete(assignmentsTable).where(and(
-    eq(assignmentsTable.id, Number(req.params["id"])),
-    eq(assignmentsTable.createdBy, caller.userId),
-  ));
+  const assignmentId = Number(req.params["id"]);
+
+  // Verify ownership
+  const [assignment] = await db.select({ id: assignmentsTable.id })
+    .from(assignmentsTable)
+    .where(and(eq(assignmentsTable.id, assignmentId), eq(assignmentsTable.createdBy, caller.userId)));
+  if (!assignment) { res.status(404).json({ error: "Задание не найдено" }); return; }
+
+  // Delete submissions first (no cascade from submissions → assignments in schema)
+  const subs = await db.select({ id: submissionsTable.id })
+    .from(submissionsTable).where(eq(submissionsTable.assignmentId, assignmentId));
+  if (subs.length > 0) {
+    const subIds = subs.map(s => s.id);
+    await db.delete(submissionAnswersTable).where(inArray(submissionAnswersTable.submissionId, subIds));
+    await db.delete(submissionsTable).where(eq(submissionsTable.assignmentId, assignmentId));
+  }
+
+  // Now delete the assignment (cascades to assigned_tasks and questions)
+  await db.delete(assignmentsTable).where(eq(assignmentsTable.id, assignmentId));
   res.status(204).send();
 });
 
