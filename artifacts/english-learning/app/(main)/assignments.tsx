@@ -1,8 +1,9 @@
 import React, { useState, useCallback, useEffect } from "react";
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl, Platform, Modal, ScrollView, Alert, TextInput,
+  View, Text, FlatList, TouchableOpacity, StyleSheet, Platform,
+  ActivityIndicator, RefreshControl, Modal, ScrollView, TextInput,
 } from "react-native";
+import ConfirmModal from "@/components/ConfirmModal";
 import { useRouter, useFocusEffect } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -216,6 +217,7 @@ export default function AssignmentsScreen() {
   const [loadingTeacherSubs, setLoadingTeacherSubs] = useState(false);
   const [myCompleted, setMyCompleted] = useState<any[]>([]);
   const [loadingCompleted, setLoadingCompleted] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<{ id: number; title: string } | null>(null);
 
   const isTeacher = isTeacherOrAdmin(user?.role ?? "");
   const isStudent = user?.role === "student";
@@ -288,7 +290,7 @@ export default function AssignmentsScreen() {
       await apiFetch(`/api/assignments/${id}`, { method: "DELETE" });
       setMyAssignments(prev => prev.filter(a => a.id !== id));
     } catch (e: any) {
-      Alert.alert("Ошибка", e.message);
+      setConfirmDelete(null);
     } finally {
       setDeletingId(null);
     }
@@ -477,23 +479,7 @@ export default function AssignmentsScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.actionBtn, { borderColor: "#fca5a5", backgroundColor: "#fef2f2", flex: undefined, paddingHorizontal: 12 }]}
-            onPress={() => {
-              if (Platform.OS === "web") {
-                // eslint-disable-next-line no-restricted-globals
-                if (window.confirm(`Удалить задание «${item.title}»?\nЭто действие нельзя отменить.`)) {
-                  handleDeleteAssignment(item.id);
-                }
-              } else {
-                Alert.alert(
-                  "Удалить задание?",
-                  `«${item.title}» будет удалено безвозвратно`,
-                  [
-                    { text: "Отмена", style: "cancel" },
-                    { text: "Удалить", style: "destructive", onPress: () => handleDeleteAssignment(item.id) },
-                  ]
-                );
-              }
-            }}
+            onPress={() => setConfirmDelete({ id: item.id, title: item.title })}
           >
             {deletingId === item.id
               ? <ActivityIndicator size="small" color="#dc2626" />
@@ -782,6 +768,16 @@ export default function AssignmentsScreen() {
           </ScrollView>
         )
       )}
+
+      <ConfirmModal
+        visible={!!confirmDelete}
+        title="Удалить задание?"
+        message={confirmDelete ? `«${confirmDelete.title}» будет скрыто из вашего списка. Ученики сохранят доступ к нему.` : ""}
+        confirmText="Удалить"
+        destructive
+        onConfirm={() => { if (confirmDelete) { handleDeleteAssignment(confirmDelete.id); setConfirmDelete(null); } }}
+        onCancel={() => setConfirmDelete(null)}
+      />
     </View>
   );
 }

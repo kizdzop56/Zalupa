@@ -210,7 +210,9 @@ export default function CreateAssignmentScreen() {
         if (q.format === "choice") {
           const filled = q.options.filter(o => o.trim());
           if (filled.length < 2) return null;
-          return { text: q.text.trim(), options: filled, correctAnswer: (filled[q.correctIndex] ?? filled[0]).trim(), orderIndex: i };
+          const filledCorrect = q.options[q.correctIndex]?.trim();
+          const correctAns = filled.find(o => o.trim() === filledCorrect) ?? filled[0];
+          return { text: q.text.trim(), options: filled, correctAnswer: correctAns.trim(), orderIndex: i };
         }
         return { text: q.text.trim(), options: [] as string[], correctAnswer: q.correctAnswer.trim(), orderIndex: i };
       })
@@ -220,9 +222,9 @@ export default function CreateAssignmentScreen() {
     const finalMediaUrl = type === "audio" ? (audioUrl.trim() || mediaUrl.trim() || undefined)
       : type === "video" ? (videoUrl.trim() || mediaUrl.trim() || undefined)
       : undefined;
-    // For reading/text_test: optional supplementary audio/video
-    const suppAudio = (type === "reading" || type === "text_test") ? audioUrl.trim() || undefined : undefined;
-    const suppVideo = (type === "reading" || type === "text_test") ? videoUrl.trim() || undefined : undefined;
+    // For reading: optional supplementary audio/video
+    const suppAudio = type === "reading" ? audioUrl.trim() || undefined : undefined;
+    const suppVideo = type === "reading" ? videoUrl.trim() || undefined : undefined;
     const finalContent = type === "reading" ? content.trim() || undefined : undefined;
 
     setSaving(true);
@@ -558,24 +560,30 @@ export default function CreateAssignmentScreen() {
           "image/*",
         )}
 
-        {/* Аудио — только text_test и audio */}
-        {(type === "text_test" || type === "audio") && renderMediaSection(
+        {/* Аудио — только audio */}
+        {type === "audio" && renderMediaSection(
           "audio",
           audioUrl, v => set("audioUrl", v),
-          audioInputMode, v => set("audioInputMode", v),
+          audioInputMode, v => {
+            if (v === "url") setSt(p => ({ ...p, audioInputMode: "url", audioUrl: "", uploadedAudioName: "" }));
+            else set("audioInputMode", "file");
+          },
           uploadedAudioName, () => setSt(p => ({ ...p, audioUrl: "", uploadedAudioName: "" })),
           audioInputRef,
           "#06b6d4", "headphones",
-          type === "audio" ? "Аудио" : "Аудио (необязательно)",
+          "Аудио",
           "https://example.com/audio.mp3",
           "audio/*",
         )}
 
-        {/* Видео — только text_test, reading, video */}
-        {(type === "text_test" || type === "reading" || type === "video") && renderMediaSection(
+        {/* Видео — только reading и video */}
+        {(type === "reading" || type === "video") && renderMediaSection(
           "video",
           videoUrl, v => set("videoUrl", v),
-          videoInputMode, v => set("videoInputMode", v),
+          videoInputMode, v => {
+            if (v === "url") setSt(p => ({ ...p, videoInputMode: "url", videoUrl: "", uploadedVideoName: "" }));
+            else set("videoInputMode", "file");
+          },
           uploadedVideoName, () => setSt(p => ({ ...p, videoUrl: "", uploadedVideoName: "" })),
           videoInputRef,
           "#f59e0b", "video",

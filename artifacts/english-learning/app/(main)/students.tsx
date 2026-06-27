@@ -1,8 +1,9 @@
 import React, { useState } from "react";
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView,
-  ActivityIndicator, Modal, TextInput, Platform, Alert,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform,
+  ActivityIndicator, Modal, TextInput,
 } from "react-native";
+import ConfirmModal from "@/components/ConfirmModal";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
@@ -291,6 +292,8 @@ export default function StudentsScreen() {
   const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState<PersonItem | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState<PendingRequest | null>(null);
 
   const listEndpoint = isTeacher
     ? "/api/connections/teacher/students"
@@ -322,45 +325,22 @@ export default function StudentsScreen() {
     try {
       await apiFetch(deleteEndpoint(item.id), { method: "DELETE" });
       setItems((prev) => prev.filter((i) => i.id !== item.id));
-    } catch (e: any) {
-      Alert.alert("Ошибка", e.message);
+    } catch { /* silent */ } finally {
+      setConfirmRemove(null);
     }
   };
 
-  const handleRemove = (item: PersonItem) => {
-    const label = isTeacher ? "ученика" : "ребёнка";
-    const msg = `«${item.name}» будет удалён из вашего списка. Это не удаляет его аккаунт.`;
-    if (Platform.OS === "web") {
-      // eslint-disable-next-line no-restricted-globals
-      if (window.confirm(`Удалить ${label}?\n${msg}`)) doRemove(item);
-    } else {
-      Alert.alert(`Удалить ${label}?`, msg, [
-        { text: "Отмена", style: "cancel" },
-        { text: "Удалить", style: "destructive", onPress: () => doRemove(item) },
-      ]);
+  const doCancel = async (req: PendingRequest) => {
+    try {
+      await apiFetch(`/api/connections/teacher/students/${req.student.id}`, { method: "DELETE" });
+      setPendingRequests((prev) => prev.filter((r) => r.requestId !== req.requestId));
+    } catch { /* silent */ } finally {
+      setConfirmCancel(null);
     }
   };
 
-  const handleCancelRequest = (req: PendingRequest) => {
-    const msg = `Заявка для «${req.student.name}» будет отозвана.`;
-    const doCancel = async () => {
-      try {
-        await apiFetch(`/api/connections/teacher/students/${req.student.id}`, { method: "DELETE" });
-        setPendingRequests((prev) => prev.filter((r) => r.requestId !== req.requestId));
-      } catch (e: any) {
-        Alert.alert("Ошибка", e.message);
-      }
-    };
-    if (Platform.OS === "web") {
-      // eslint-disable-next-line no-restricted-globals
-      if (window.confirm(`Отменить заявку?\n${msg}`)) doCancel();
-    } else {
-      Alert.alert("Отменить заявку?", msg, [
-        { text: "Отмена", style: "cancel" },
-        { text: "Отозвать", style: "destructive", onPress: doCancel },
-      ]);
-    }
-  };
+  const handleRemove = (item: PersonItem) => setConfirmRemove(item);
+  const handleCancelRequest = (req: PendingRequest) => setConfirmCancel(req);
 
   const title = isTeacher ? "Мои ученики" : "Мои дети";
   const addTitle = isTeacher ? "Добавить ученика" : "Добавить ребёнка";
@@ -493,6 +473,25 @@ export default function StudentsScreen() {
           )}
         </ScrollView>
       )}
+
+      <ConfirmModal
+        visible={!!confirmRemove}
+        title={isTeacher ? "Удалить ученика?" : "Удалить ребёнка?"}
+        message={confirmRemove ? `«${confirmRemove.name}» будет удалён из вашего списка. Это не удаляет его аккаунт.` : ""}
+        confirmText="Удалить"
+        destructive
+        onConfirm={() => { if (confirmRemove) doRemove(confirmRemove); }}
+        onCancel={() => setConfirmRemove(null)}
+      />
+      <ConfirmModal
+        visible={!!confirmCancel}
+        title="Отменить заявку?"
+        message={confirmCancel ? `Заявка для «${confirmCancel.student.name}» будет отозвана.` : ""}
+        confirmText="Отозвать"
+        destructive
+        onConfirm={() => { if (confirmCancel) doCancel(confirmCancel); }}
+        onCancel={() => setConfirmCancel(null)}
+      />
     </View>
   );
 }

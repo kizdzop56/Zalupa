@@ -11,7 +11,7 @@ export const assignmentsTable = pgTable("assignments", {
   description: text("description").notNull(),
   type: assignmentTypeEnum("type").notNull(),
   source: assignmentSourceEnum("source").notNull().default("app_suggested"),
-  createdBy: integer("created_by"), // teacher/admin user id, null = app
+  createdBy: integer("created_by"),
   ageMin: integer("age_min").notNull().default(5),
   ageMax: integer("age_max").notNull().default(18),
   points: integer("points").notNull().default(10),
@@ -20,6 +20,7 @@ export const assignmentsTable = pgTable("assignments", {
   isDraft: boolean("is_draft").notNull().default(true),
   timeLimitMinutes: integer("time_limit_minutes"),
   imageUrl: text("image_url"),
+  deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

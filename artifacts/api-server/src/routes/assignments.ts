@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { assignmentsTable, questionsTable, assignedTasksTable, submissionsTable, submissionAnswersTable, usersTable, teacherStudentsTable } from "@workspace/db";
-import { eq, and, gte, lte, inArray, or, desc, sql } from "drizzle-orm";
+import { eq, and, gte, lte, inArray, or, desc, isNull } from "drizzle-orm";
 import { requireAuth, getUser, requireRole, isTeacher } from "../lib/auth";
 
 const router = Router();
@@ -29,14 +29,17 @@ router.get("/assignments", requireAuth, async (req, res) => {
   res.json(rows);
 });
 
-// ── Teacher: my assignments (drafts + published) ──────────────────────
+// ── Teacher: my assignments (drafts + published, not soft-deleted) ────
 router.get("/assignments/my-assignments", requireAuth, async (req, res) => {
   const caller = getUser(req);
   if (!isTeacher(caller.role) && caller.role !== "admin") {
     res.status(403).json({ error: "Forbidden" }); return;
   }
   const rows = await db.select().from(assignmentsTable)
-    .where(eq(assignmentsTable.createdBy, caller.userId));
+    .where(and(
+      eq(assignmentsTable.createdBy, caller.userId),
+      isNull(assignmentsTable.deletedAt),
+    ));
   res.json(rows);
 });
 
@@ -390,6 +393,7 @@ router.delete("/assigned-tasks/:assignedTaskId", requireAuth, async (req, res) =
   res.status(204).send();
 });
 
+// Soft-delete: hides assignment from teacher's list but students keep their assigned tasks
 router.delete("/assignments/:id", requireAuth, async (req, res) => {
   const caller = getUser(req);
   if (!isTeacher(caller.role) && caller.role !== "admin") {
@@ -397,23 +401,16 @@ router.delete("/assignments/:id", requireAuth, async (req, res) => {
   }
   const assignmentId = Number(req.params["id"]);
 
-  // Verify ownership
-  const [assignment] = await db.select({ id: assignmentsTable.id })
-    .from(assignmentsTable)
-    .where(and(eq(assignmentsTable.id, assignmentId), eq(assignmentsTable.createdBy, caller.userId)));
-  if (!assignment) { res.status(404).json({ error: "Задание не найдено" }); return; }
+  const [updated] = await db.update(assignmentsTable)
+    .set({ deletedAt: new Date() })
+    .where(and(
+      eq(assignmentsTable.id, assignmentId),
+      eq(assignmentsTable.createdBy, caller.userId),
+      isNull(assignmentsTable.deletedAt),
+    ))
+    .returning({ id: assignmentsTable.id });
 
-  // Delete submissions first (no cascade from submissions → assignments in schema)
-  const subs = await db.select({ id: submissionsTable.id })
-    .from(submissionsTable).where(eq(submissionsTable.assignmentId, assignmentId));
-  if (subs.length > 0) {
-    const subIds = subs.map(s => s.id);
-    await db.delete(submissionAnswersTable).where(inArray(submissionAnswersTable.submissionId, subIds));
-    await db.delete(submissionsTable).where(eq(submissionsTable.assignmentId, assignmentId));
-  }
-
-  // Now delete the assignment (cascades to assigned_tasks and questions)
-  await db.delete(assignmentsTable).where(eq(assignmentsTable.id, assignmentId));
+  if (!updated) { res.status(404).json({ error: "Задание не найдено" }); return; }
   res.status(204).send();
 });
 
