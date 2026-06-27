@@ -772,11 +772,9 @@ export default function AssignmentsScreen() {
               );
             })()}
 
-            {/* Student: assigned tasks, excluding already completed */}
+            {/* Student: assigned tasks — server already excludes submitted ones */}
             {isStudent && (() => {
-              const completedIds = new Set(myCompleted.map((c: any) => c.assignmentId));
               const filtered = myTasks.filter((t: any) =>
-                !completedIds.has(t.assignmentId) &&
                 (filter === "Все" || t.type === filter) &&
                 (!searchLower || t.title.toLowerCase().includes(searchLower))
               );
@@ -784,9 +782,7 @@ export default function AssignmentsScreen() {
                 <View style={[styles.empty, { paddingTop: 40 }]}>
                   <Feather name="check-circle" size={48} color={colors.mutedForeground} />
                   <Text style={styles.emptyText}>
-                    {myTasks.length > 0
-                      ? "Все задания выполнены! 🎉\nПроверь вкладку «Выполненные»."
-                      : "Учитель ещё не назначил заданий"}
+                    {"Учитель ещё не назначил заданий"}
                   </Text>
                 </View>
               );
