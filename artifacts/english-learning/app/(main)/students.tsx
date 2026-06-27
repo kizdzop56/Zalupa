@@ -318,7 +318,7 @@ export default function StudentsScreen() {
 
   React.useEffect(() => { load(); }, [load]);
 
-  const handleRemove = async (item: PersonItem) => {
+  const doRemove = async (item: PersonItem) => {
     try {
       await apiFetch(deleteEndpoint(item.id), { method: "DELETE" });
       setItems((prev) => prev.filter((i) => i.id !== item.id));
@@ -327,13 +327,38 @@ export default function StudentsScreen() {
     }
   };
 
-  const handleCancelRequest = async (req: PendingRequest) => {
-    try {
-      await apiFetch(`/api/connections/teacher/students/${req.student.id}`, { method: "DELETE" });
-      setPendingRequests((prev) => prev.filter((r) => r.requestId !== req.requestId));
-    } catch (e: any) {
-      Alert.alert("Ошибка", e.message);
-    }
+  const handleRemove = (item: PersonItem) => {
+    const label = isTeacher ? "ученика" : "ребёнка";
+    Alert.alert(
+      `Удалить ${label}?`,
+      `«${item.name}» будет удалён из вашего списка. Это не удаляет его аккаунт.`,
+      [
+        { text: "Отмена", style: "cancel" },
+        { text: "Удалить", style: "destructive", onPress: () => doRemove(item) },
+      ]
+    );
+  };
+
+  const handleCancelRequest = (req: PendingRequest) => {
+    Alert.alert(
+      "Отменить заявку?",
+      `Заявка для «${req.student.name}» будет отозвана.`,
+      [
+        { text: "Отмена", style: "cancel" },
+        {
+          text: "Отозвать",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await apiFetch(`/api/connections/teacher/students/${req.student.id}`, { method: "DELETE" });
+              setPendingRequests((prev) => prev.filter((r) => r.requestId !== req.requestId));
+            } catch (e: any) {
+              Alert.alert("Ошибка", e.message);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const title = isTeacher ? "Мои ученики" : "Мои дети";

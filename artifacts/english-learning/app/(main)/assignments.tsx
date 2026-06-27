@@ -423,49 +423,59 @@ export default function AssignmentsScreen() {
     const color = TYPE_COLORS[item.type] || colors.primary;
     const isDraft = item.isDraft;
     return (
-      <TouchableOpacity
+      // Outer View — NOT a Touchable, so inner buttons get touches reliably
+      <View
         key={item.id}
         style={[styles.card, isDraft && { borderColor: colors.border, borderStyle: "dashed" }]}
-        onPress={() => router.push(`/(main)/assignment/${item.id}` as any)}
-        activeOpacity={0.75}
       >
-        <View style={styles.cardHeader}>
-          <View style={[styles.typeIcon, { backgroundColor: color + "20" }]}>
-            <Feather name={TYPE_ICONS[item.type]} size={22} color={color} />
+        {/* Title area tappable → navigate to detail */}
+        <TouchableOpacity
+          onPress={() => router.push(`/(main)/assignment/${item.id}` as any)}
+          activeOpacity={0.75}
+        >
+          <View style={styles.cardHeader}>
+            <View style={[styles.typeIcon, { backgroundColor: color + "20" }]}>
+              <Feather name={TYPE_ICONS[item.type]} size={22} color={color} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
+              {isDraft && (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 }}>
+                  <Feather name="edit-2" size={11} color={colors.mutedForeground} />
+                  <Text style={{ fontSize: 11, color: colors.mutedForeground, fontWeight: "600" }}>Черновик</Text>
+                </View>
+              )}
+            </View>
           </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
-            {isDraft && (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 3 }}>
-                <Feather name="edit-2" size={11} color={colors.mutedForeground} />
-                <Text style={{ fontSize: 11, color: colors.mutedForeground, fontWeight: "600" }}>Черновик</Text>
-              </View>
-            )}
-          </View>
-        </View>
+        </TouchableOpacity>
+
+        {/* Action buttons — independent from navigation area */}
         <View style={styles.cardActions}>
           <TouchableOpacity
             style={[styles.actionBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "10", flex: undefined, paddingHorizontal: 12 }]}
-            onPress={(e) => { e.stopPropagation(); setAssignTarget(item); }}
+            onPress={() => setAssignTarget(item)}
           >
             <Feather name="send" size={14} color={colors.primary} />
             <Text style={[styles.actionBtnText, { color: colors.primary }]}>Назначить</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.actionBtn, { borderColor: colors.border, backgroundColor: colors.card, flex: undefined, paddingHorizontal: 12 }]}
-            onPress={(e) => { e.stopPropagation(); router.push(`/(main)/teacher-results/${item.id}` as any); }}
+            onPress={() => router.push(`/(main)/teacher-results/${item.id}` as any)}
           >
             <Feather name="bar-chart-2" size={14} color={colors.mutedForeground} />
             <Text style={[styles.actionBtnText, { color: colors.mutedForeground }]}>Итоги</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.actionBtn, { borderColor: "#fca5a5", backgroundColor: "#fef2f2", flex: undefined, paddingHorizontal: 12 }]}
-            onPress={(e) => {
-              e.stopPropagation();
-              Alert.alert("Удалить задание?", item.title, [
-                { text: "Отмена", style: "cancel" },
-                { text: "Удалить", style: "destructive", onPress: () => handleDeleteAssignment(item.id) },
-              ]);
+            onPress={() => {
+              Alert.alert(
+                "Удалить задание?",
+                `«${item.title}» будет удалено безвозвратно`,
+                [
+                  { text: "Отмена", style: "cancel" },
+                  { text: "Удалить", style: "destructive", onPress: () => handleDeleteAssignment(item.id) },
+                ]
+              );
             }}
           >
             {deletingId === item.id
@@ -474,7 +484,7 @@ export default function AssignmentsScreen() {
             }
           </TouchableOpacity>
         </View>
-      </TouchableOpacity>
+      </View>
     );
   };
 

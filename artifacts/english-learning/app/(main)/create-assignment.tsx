@@ -152,6 +152,28 @@ export default function CreateAssignmentScreen() {
       return;
     }
 
+    // Validate questions that have text filled in
+    for (let i = 0; i < questions.length; i++) {
+      const q = questions[i];
+      if (!q.text.trim()) continue;
+      if (q.format === "open") {
+        if (!q.correctAnswer.trim()) {
+          set("formError", `Вопрос ${i + 1}: введите правильный ответ`);
+          return;
+        }
+      } else {
+        const filledOptions = q.options.filter(o => o.trim());
+        if (filledOptions.length < 2) {
+          set("formError", `Вопрос ${i + 1}: заполните минимум 2 варианта ответа`);
+          return;
+        }
+        if (!q.options[q.correctIndex]?.trim()) {
+          set("formError", `Вопрос ${i + 1}: выберите правильный вариант из заполненных`);
+          return;
+        }
+      }
+    }
+
     const questionPayload = questions
       .filter(q => q.text.trim())
       .map((q, i) => {
