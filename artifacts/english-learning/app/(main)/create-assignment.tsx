@@ -136,7 +136,6 @@ export default function CreateAssignmentScreen() {
   const handleSubmit = async () => {
     set("formError", "");
     if (!title.trim()) { set("formError", "Введите название задания"); return; }
-    if (!description.trim()) { set("formError", "Введите описание задания"); return; }
     const ageMinNum = parseInt(ageMin, 10);
     const ageMaxNum = parseInt(ageMax, 10);
     if (isNaN(ageMinNum) || ageMinNum < 1) { set("formError", "Возраст «от» некорректен"); return; }

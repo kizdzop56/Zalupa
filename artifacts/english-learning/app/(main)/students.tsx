@@ -291,6 +291,7 @@ export default function StudentsScreen() {
   const [items, setItems] = useState<PersonItem[]>([]);
   const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<PersonItem | null>(null);
   const [confirmCancel, setConfirmCancel] = useState<PendingRequest | null>(null);
@@ -308,6 +309,7 @@ export default function StudentsScreen() {
 
   const load = React.useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const [accepted, pending] = await Promise.all([
         apiFetch(listEndpoint),
@@ -315,7 +317,9 @@ export default function StudentsScreen() {
       ]);
       setItems(accepted);
       setPendingRequests(pending);
-    } catch { /* ignore */ }
+    } catch (e: any) {
+      setError(e.message ?? "Не удалось загрузить");
+    }
     finally { setLoading(false); }
   }, [listEndpoint, isTeacher]);
 
@@ -393,6 +397,18 @@ export default function StudentsScreen() {
 
       {loading ? (
         <View style={s.empty}><ActivityIndicator color={colors.primary} size="large" /></View>
+      ) : error ? (
+        <View style={s.empty}>
+          <Text style={s.emptyEmoji}>⚠️</Text>
+          <Text style={s.emptyTitle}>Ошибка загрузки</Text>
+          <Text style={s.emptyText}>{error}</Text>
+          <TouchableOpacity
+            onPress={load}
+            style={{ marginTop: 12, backgroundColor: colors.primary, borderRadius: 12, paddingHorizontal: 20, paddingVertical: 10 }}
+          >
+            <Text style={{ color: "#fff", fontWeight: "700" }}>Повторить</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
         <ScrollView contentContainerStyle={s.content}>
           {/* Pending requests (teacher only) */}

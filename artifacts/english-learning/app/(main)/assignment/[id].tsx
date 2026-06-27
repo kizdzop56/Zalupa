@@ -163,7 +163,7 @@ export default function AssignmentDetailScreen() {
       setResult(data);
       setSubmitted(true);
     } catch (e: any) {
-      Alert.alert("Ошибка", "Не удалось отправить. Попробуйте снова.");
+      Alert.alert("Ошибка отправки", e.message ?? "Не удалось отправить. Попробуйте снова.");
     } finally {
       setSubmitting(false);
     }

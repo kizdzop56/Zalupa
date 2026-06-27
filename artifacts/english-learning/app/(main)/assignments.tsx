@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from "react";
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet, Platform,
-  ActivityIndicator, RefreshControl, Modal, ScrollView, TextInput,
+  ActivityIndicator, RefreshControl, Modal, ScrollView, TextInput, Alert,
 } from "react-native";
 import ConfirmModal from "@/components/ConfirmModal";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -36,7 +36,7 @@ const TYPE_ICONS: Record<string, any> = {
   text_test: "edit-3", audio: "headphones", reading: "book", video: "video",
 };
 const TYPE_LABELS: Record<string, string> = {
-  text_test: "Тест", audio: "Слушание", reading: "Чтение", video: "Видео",
+  text_test: "Тест", audio: "Аудирование", reading: "Чтение", video: "Видео",
 };
 const TYPE_COLORS: Record<string, string> = {
   text_test: "#8b5cf6", audio: "#06b6d4", reading: "#10b981", video: "#f59e0b",
@@ -290,7 +290,7 @@ export default function AssignmentsScreen() {
       await apiFetch(`/api/assignments/${id}`, { method: "DELETE" });
       setMyAssignments(prev => prev.filter(a => a.id !== id));
     } catch (e: any) {
-      setConfirmDelete(null);
+      Alert.alert("Ошибка", e.message ?? "Не удалось удалить задание");
     } finally {
       setDeletingId(null);
     }

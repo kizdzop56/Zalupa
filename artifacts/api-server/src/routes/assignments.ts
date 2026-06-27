@@ -201,12 +201,11 @@ router.post("/assignments", requireAuth, async (req, res) => {
   const { title, description, type, ageMin, ageMax, points, mediaUrl, content, questions, isDraft, timeLimitMinutes, imageUrl } = req.body;
 
   if (!title?.trim()) { res.status(400).json({ error: "Введите название задания" }); return; }
-  if (!description?.trim()) { res.status(400).json({ error: "Введите описание задания" }); return; }
   if (!type) { res.status(400).json({ error: "Выберите тип задания" }); return; }
 
   const [assignment] = await db.insert(assignmentsTable).values({
     title: title.trim(),
-    description: description.trim(),
+    description: description?.trim() ?? "",
     type,
     source: "teacher_created",
     createdBy: caller.userId,

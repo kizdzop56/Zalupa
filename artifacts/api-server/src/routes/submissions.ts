@@ -29,7 +29,7 @@ router.post("/assignments/:id/submit", requireAuth, async (req, res) => {
   for (const answer of answers) {
     const question = questions.find(q => q.id === answer.questionId);
     if (!question) continue;
-    const isCorrect = question.correctAnswer.toLowerCase().trim() === answer.answer.toLowerCase().trim();
+    const isCorrect = (question.correctAnswer ?? "").toLowerCase().trim() === (answer.answer ?? "").toLowerCase().trim();
     if (isCorrect) correctCount++;
     results.push({
       questionId: question.id,
