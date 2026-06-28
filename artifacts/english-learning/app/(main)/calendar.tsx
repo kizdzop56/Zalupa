@@ -228,6 +228,29 @@ export default function CalendarScreen() {
 
   useEffect(() => { loadSlots(selectedDate); }, [selectedDate]);
 
+  // Auto-refresh every 30 s so past slots disappear without manual tab switch
+  useEffect(() => {
+    const id = setInterval(() => {
+      loadSlots(selectedDate);
+      loadBookings();
+    }, 30_000);
+    return () => clearInterval(id);
+  }, [selectedDate, loadSlots, loadBookings]);
+
+  // Also refresh when browser tab becomes visible (web)
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        loadSlots(selectedDate);
+        loadBookings();
+      }
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisible);
+      return () => document.removeEventListener("visibilitychange", onVisible);
+    }
+  }, [selectedDate, loadSlots, loadBookings]);
+
   const refresh = useCallback(async () => {
     setRefreshing(true);
     await Promise.all([loadSlots(selectedDate), loadBookings()]);
@@ -312,17 +335,17 @@ export default function CalendarScreen() {
     },
     badgeText: { fontSize: 10, fontWeight: "800", color: "#fff" },
 
-    datePicker: { paddingHorizontal: 16, paddingVertical: 10 },
+    datePicker: { paddingHorizontal: 16, paddingVertical: 6 },
     dateChip: {
-      alignItems: "center", paddingHorizontal: 10, paddingVertical: 8,
-      borderRadius: 14, marginHorizontal: 4, minWidth: 52, backgroundColor: colors.muted,
+      alignItems: "center", paddingHorizontal: 8, paddingVertical: 5,
+      borderRadius: 12, marginHorizontal: 3, minWidth: 46, backgroundColor: colors.muted,
     },
     dateChipActive: { backgroundColor: colors.primary },
-    dc_day: { fontSize: 10, fontWeight: "600", color: colors.mutedForeground, marginBottom: 2 },
+    dc_day: { fontSize: 9, fontWeight: "600", color: colors.mutedForeground, marginBottom: 1 },
     dc_dayA: { color: "#fff" },
-    dc_num: { fontSize: 18, fontWeight: "800", color: colors.foreground },
+    dc_num: { fontSize: 15, fontWeight: "800", color: colors.foreground },
     dc_numA: { color: "#fff" },
-    dc_mon: { fontSize: 9, color: colors.mutedForeground },
+    dc_mon: { fontSize: 8, color: colors.mutedForeground, marginTop: 1 },
     dc_monA: { color: "#ffffffcc" },
 
     scroll: { padding: 20, paddingBottom: 120 },
@@ -647,38 +670,68 @@ export default function CalendarScreen() {
 
   // ── Student: my bookings tab ────────────────────────────────────────
   const renderStudentBookings = () => {
-    const sorted = [...bookings].sort((a, b) => (a.date ?? "").localeCompare(b.date ?? ""));
+    const sorted = [...bookings].sort((a, b) => {
+      const da = (a.date ?? "") + (a.startTime ?? "");
+      const db = (b.date ?? "") + (b.startTime ?? "");
+      return da.localeCompare(db);
+    });
+    const upcoming = sorted.filter((b) => !isPastSlot(b.date ?? "", b.endTime ?? ""));
+    const past     = sorted.filter((b) =>  isPastSlot(b.date ?? "", b.endTime ?? ""));
+
+    const renderBookingCard = (b: BookingRow, dimmed = false) => {
+      const cfg = BOOKING_CFG[b.status as keyof typeof BOOKING_CFG];
+      return (
+        <View
+          key={b.id}
+          style={[
+            s.reqCard,
+            { borderLeftWidth: 4, borderLeftColor: dimmed ? colors.border : (cfg?.color ?? colors.border) },
+            dimmed && { opacity: 0.5 },
+          ]}
+        >
+          <View style={s.reqTop}>
+            <View style={[s.reqAvatar, { backgroundColor: (dimmed ? colors.mutedForeground : (cfg?.color ?? colors.primary)) + "20" }]}>
+              <Feather name={cfg?.icon ?? "calendar"} size={18} color={dimmed ? colors.mutedForeground : (cfg?.color ?? colors.primary)} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.reqName}>{b.teacherName ?? "Учитель"}</Text>
+              <Text style={s.reqTime}>{formatDate(b.date)}, {b.startTime} – {b.endTime}</Text>
+            </View>
+            <Text style={[s.statusLabel, { color: dimmed ? colors.mutedForeground : (cfg?.color ?? colors.mutedForeground) }]}>
+              {dimmed ? "Завершено" : (cfg?.label ?? b.status)}
+            </Text>
+          </View>
+          {b.note ? <Text style={s.reqNote}>«{b.note}»</Text> : null}
+        </View>
+      );
+    };
+
     return (
       <ScrollView
         contentContainerStyle={s.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
       >
-        {sorted.length === 0 && (
+        {upcoming.length === 0 && past.length === 0 && (
           <View style={s.emptyBox}>
             <Text style={s.emptyEmoji}>📝</Text>
             <Text style={s.emptyText}>Нет записей{"\n"}Перейдите в расписание и запишитесь к учителю</Text>
           </View>
         )}
-        {sorted.map((b) => {
-          const cfg = BOOKING_CFG[b.status as keyof typeof BOOKING_CFG];
-          return (
-            <View key={b.id} style={[s.reqCard, { borderLeftWidth: 4, borderLeftColor: cfg?.color ?? colors.border }]}>
-              <View style={s.reqTop}>
-                <View style={[s.reqAvatar, { backgroundColor: (cfg?.color ?? colors.primary) + "20" }]}>
-                  <Feather name={cfg?.icon ?? "calendar"} size={18} color={cfg?.color ?? colors.primary} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.reqName}>{b.teacherName ?? "Учитель"}</Text>
-                  <Text style={s.reqTime}>{formatDate(b.date)}, {b.startTime} – {b.endTime}</Text>
-                </View>
-                <Text style={[s.statusLabel, { color: cfg?.color ?? colors.mutedForeground }]}>
-                  {cfg?.label ?? b.status}
-                </Text>
-              </View>
-              {b.note ? <Text style={s.reqNote}>«{b.note}»</Text> : null}
-            </View>
-          );
-        })}
+        {upcoming.length === 0 && past.length > 0 && (
+          <View style={s.emptyBox}>
+            <Text style={s.emptyEmoji}>✅</Text>
+            <Text style={s.emptyText}>Все занятия завершены</Text>
+          </View>
+        )}
+
+        {upcoming.map((b) => renderBookingCard(b))}
+
+        {past.length > 0 && (
+          <>
+            <Text style={s.historyLabel}>— История занятий —</Text>
+            {past.map((b) => renderBookingCard(b, true))}
+          </>
+        )}
       </ScrollView>
     );
   };
