@@ -52,6 +52,13 @@ type BookingRow = {
   createdAt: string; date: string | null; startTime: string | null; endTime: string | null;
   studentName?: string | null; teacherName?: string | null;
 };
+type CustomRequest = {
+  id: number; studentId: number; teacherId: number;
+  date: string; startTime: string; endTime: string;
+  note: string | null; status: string; createdAt: string;
+  studentName?: string | null; teacherName?: string | null;
+};
+type TeacherBasic = { id: number; name: string | null; username: string };
 
 // ── Date / time helpers ───────────────────────────────────────────────
 const DAY_SHORT = ["Вс", "Пн", "Вт", "Ср", "Чт", "Пт", "Сб"];
@@ -213,6 +220,18 @@ export default function CalendarScreen() {
   const [bookNote, setBookNote] = useState("");
   const [booking, setBooking] = useState(false);
 
+  // Custom time request (student)
+  const [customRequests, setCustomRequests] = useState<CustomRequest[]>([]);
+  const [showCustomReq, setShowCustomReq] = useState(false);
+  const [crTeachers, setCrTeachers] = useState<TeacherBasic[]>([]);
+  const [crTeacherId, setCrTeacherId] = useState<number | null>(null);
+  const [crStartH, setCrStartH] = useState("09");
+  const [crStartM, setCrStartM] = useState("00");
+  const [crEndH, setCrEndH] = useState("10");
+  const [crEndM, setCrEndM] = useState("00");
+  const [crNote, setCrNote] = useState("");
+  const [crSaving, setCrSaving] = useState(false);
+
   // ── Data loading ────────────────────────────────────────────────────
   const loadSlots = useCallback(async (date: string) => {
     const data = await apiFetch(`/api/calendar/slots?date=${date}`).catch(() => []);
@@ -224,9 +243,14 @@ export default function CalendarScreen() {
     setBookings(data);
   }, []);
 
+  const loadCustomRequests = useCallback(async () => {
+    const data = await apiFetch("/api/calendar/custom-requests").catch(() => []);
+    setCustomRequests(data);
+  }, []);
+
   useEffect(() => {
     setLoading(true);
-    Promise.all([loadSlots(selectedDate), loadBookings()]).finally(() => setLoading(false));
+    Promise.all([loadSlots(selectedDate), loadBookings(), loadCustomRequests()]).finally(() => setLoading(false));
   }, []);
 
   useEffect(() => { loadSlots(selectedDate); }, [selectedDate]);
@@ -236,9 +260,10 @@ export default function CalendarScreen() {
     const id = setInterval(() => {
       loadSlots(selectedDate);
       loadBookings();
+      loadCustomRequests();
     }, 30_000);
     return () => clearInterval(id);
-  }, [selectedDate, loadSlots, loadBookings]);
+  }, [selectedDate, loadSlots, loadBookings, loadCustomRequests]);
 
   // Also refresh when browser tab becomes visible (web)
   useEffect(() => {
@@ -246,19 +271,20 @@ export default function CalendarScreen() {
       if (document.visibilityState === "visible") {
         loadSlots(selectedDate);
         loadBookings();
+        loadCustomRequests();
       }
     };
     if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", onVisible);
       return () => document.removeEventListener("visibilitychange", onVisible);
     }
-  }, [selectedDate, loadSlots, loadBookings]);
+  }, [selectedDate, loadSlots, loadBookings, loadCustomRequests]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([loadSlots(selectedDate), loadBookings()]);
+    await Promise.all([loadSlots(selectedDate), loadBookings(), loadCustomRequests()]);
     setRefreshing(false);
-  }, [selectedDate, loadSlots, loadBookings]);
+  }, [selectedDate, loadSlots, loadBookings, loadCustomRequests]);
 
   // ── Actions ─────────────────────────────────────────────────────────
   const handleAddSlot = async () => {
@@ -308,8 +334,42 @@ export default function CalendarScreen() {
       await apiFetch(`/api/calendar/bookings/${bookingId}`, {
         method: "PATCH", body: JSON.stringify({ status }),
       });
-      await Promise.all([loadSlots(selectedDate), loadBookings()]);
-    } catch (e: any) { Alert.alert("Ошибка", e.message); }
+      await Promise.all([loadSlots(selectedDate), loadBookings(), loadCustomRequests()]);
+    } catch (e: any) { /* silent on web */ }
+  };
+
+  const handleRespondCustom = async (requestId: number, status: "confirmed" | "rejected") => {
+    try {
+      await apiFetch(`/api/calendar/custom-requests/${requestId}`, {
+        method: "PATCH", body: JSON.stringify({ status }),
+      });
+      await Promise.all([loadSlots(selectedDate), loadBookings(), loadCustomRequests()]);
+    } catch (e: any) { /* silent on web */ }
+  };
+
+  const handleOpenCustomReq = async () => {
+    const teachers = await apiFetch("/api/connections/student/teachers").catch(() => []);
+    setCrTeachers(teachers);
+    if (teachers.length > 0) setCrTeacherId(teachers[0].id);
+    setCrStartH("09"); setCrStartM("00"); setCrEndH("10"); setCrEndM("00"); setCrNote("");
+    setShowCustomReq(true);
+  };
+
+  const handleSendCustomReq = async () => {
+    if (!crTeacherId || crSaving) return;
+    const startTime = `${crStartH}:${crStartM}`;
+    const endTime   = `${crEndH}:${crEndM}`;
+    if (endTime <= startTime) return;
+    setCrSaving(true);
+    try {
+      await apiFetch("/api/calendar/custom-requests", {
+        method: "POST",
+        body: JSON.stringify({ teacherId: crTeacherId, date: selectedDate, startTime, endTime, note: crNote.trim() || undefined }),
+      });
+      setShowCustomReq(false);
+      await loadCustomRequests();
+    } catch (e: any) { /* silent */ }
+    finally { setCrSaving(false); }
   };
 
   // ── Styles ──────────────────────────────────────────────────────────
@@ -564,41 +624,74 @@ export default function CalendarScreen() {
   };
 
   // ── Teacher: requests tab ───────────────────────────────────────────
-  const renderTeacherRequests = () => (
-    <ScrollView
-      contentContainerStyle={s.scroll}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
-    >
-      {bookings.length === 0 && (
-        <View style={s.emptyBox}>
-          <Text style={s.emptyEmoji}>🎉</Text>
-          <Text style={s.emptyText}>Нет новых запросов</Text>
-        </View>
-      )}
-      {bookings.map((b) => (
-        <View key={b.id} style={s.reqCard}>
-          <View style={s.reqTop}>
-            <View style={[s.reqAvatar, { backgroundColor: colors.primary + "20" }]}>
-              <Feather name="user" size={18} color={colors.primary} />
+  const renderTeacherRequests = () => {
+    const totalCount = bookings.length + customRequests.length;
+    return (
+      <ScrollView
+        contentContainerStyle={s.scroll}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
+      >
+        {totalCount === 0 && (
+          <View style={s.emptyBox}>
+            <Text style={s.emptyEmoji}>🎉</Text>
+            <Text style={s.emptyText}>Нет новых запросов</Text>
+          </View>
+        )}
+
+        {/* Regular slot bookings */}
+        {bookings.map((b) => (
+          <View key={`sb-${b.id}`} style={s.reqCard}>
+            <View style={s.reqTop}>
+              <View style={[s.reqAvatar, { backgroundColor: colors.primary + "20" }]}>
+                <Feather name="user" size={18} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.reqName}>{b.studentName ?? "Ученик"}</Text>
+                <Text style={s.reqTime}>{formatDate(b.date)}, {b.startTime} – {b.endTime}</Text>
+              </View>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.reqName}>{b.studentName ?? "Ученик"}</Text>
-              <Text style={s.reqTime}>{formatDate(b.date)}, {b.startTime} – {b.endTime}</Text>
+            {b.note ? <Text style={s.reqNote}>«{b.note}»</Text> : null}
+            <View style={s.btnRow}>
+              <TouchableOpacity style={[s.btnConfirm, { flex: 1, alignItems: "center" }]} onPress={() => handleRespond(b.id, "confirmed")}>
+                <Text style={s.btnText}>Подтвердить</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.btnReject, { flex: 1, alignItems: "center" }]} onPress={() => handleRespond(b.id, "rejected")}>
+                <Text style={s.btnText}>Отклонить</Text>
+              </TouchableOpacity>
             </View>
           </View>
-          {b.note ? <Text style={s.reqNote}>«{b.note}»</Text> : null}
-          <View style={s.btnRow}>
-            <TouchableOpacity style={[s.btnConfirm, { flex: 1, alignItems: "center" }]} onPress={() => handleRespond(b.id, "confirmed")}>
-              <Text style={s.btnText}>Подтвердить</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[s.btnReject, { flex: 1, alignItems: "center" }]} onPress={() => handleRespond(b.id, "rejected")}>
-              <Text style={s.btnText}>Отклонить</Text>
-            </TouchableOpacity>
+        ))}
+
+        {/* Custom time requests from students */}
+        {customRequests.length > 0 && bookings.length > 0 && (
+          <Text style={s.historyLabel}>— Запросы своего времени —</Text>
+        )}
+        {customRequests.map((cr) => (
+          <View key={`cr-${cr.id}`} style={[s.reqCard, { borderLeftWidth: 3, borderLeftColor: "#8b5cf6" }]}>
+            <View style={s.reqTop}>
+              <View style={[s.reqAvatar, { backgroundColor: "#8b5cf620" }]}>
+                <Feather name="clock" size={18} color="#8b5cf6" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.reqName}>{cr.studentName ?? "Ученик"}</Text>
+                <Text style={s.reqTime}>{formatDate(cr.date)}, {cr.startTime} – {cr.endTime}</Text>
+                <Text style={[s.reqTime, { color: "#8b5cf6", fontSize: 11 }]}>Предлагает своё время</Text>
+              </View>
+            </View>
+            {cr.note ? <Text style={s.reqNote}>«{cr.note}»</Text> : null}
+            <View style={s.btnRow}>
+              <TouchableOpacity style={[s.btnConfirm, { flex: 1, alignItems: "center" }]} onPress={() => handleRespondCustom(cr.id, "confirmed")}>
+                <Text style={s.btnText}>Принять</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.btnReject, { flex: 1, alignItems: "center" }]} onPress={() => handleRespondCustom(cr.id, "rejected")}>
+                <Text style={s.btnText}>Отклонить</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
-      ))}
-    </ScrollView>
-  );
+        ))}
+      </ScrollView>
+    );
+  };
 
   // ── Student: schedule tab ───────────────────────────────────────────
   const renderStudentSchedule = () => {
@@ -677,6 +770,12 @@ export default function CalendarScreen() {
             })}
           </>
         )}
+
+        {/* Button to request custom time */}
+        <TouchableOpacity style={[s.addBtn, { borderColor: "#8b5cf6" }]} onPress={handleOpenCustomReq}>
+          <Feather name="clock" size={18} color="#8b5cf6" />
+          <Text style={[s.addBtnText, { color: "#8b5cf6" }]}>Предложить своё время</Text>
+        </TouchableOpacity>
       </ScrollView>
     );
   };
@@ -782,6 +881,43 @@ export default function CalendarScreen() {
             {past.map((b) => renderBookingCard(b, true))}
           </>
         )}
+
+        {/* Custom time requests sent by student */}
+        {bookingFilter === "all" && customRequests.length > 0 && (
+          <>
+            <Text style={s.historyLabel}>— Предложения своего времени —</Text>
+            {customRequests.map((cr) => {
+              const isPastCr = isPastSlot(cr.date, cr.endTime);
+              const isRejCr = cr.status === "rejected";
+              const crColor = cr.status === "confirmed" ? "#10b981" : isRejCr ? "#ef4444" : "#8b5cf6";
+              const crLabel = cr.status === "confirmed" ? "Принято" : isRejCr ? "Отклонено" : "Ожидает";
+              return (
+                <View
+                  key={`cr-${cr.id}`}
+                  style={[s.reqCard, { borderLeftWidth: 4, borderLeftColor: crColor }, isPastCr && !isRejCr && { opacity: 0.5 }]}
+                >
+                  <View style={s.reqTop}>
+                    <View style={[s.reqAvatar, { backgroundColor: crColor + "20" }]}>
+                      <Feather name="clock" size={18} color={crColor} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.reqName}>{cr.teacherName ?? "Учитель"}</Text>
+                      <Text style={s.reqTime}>{formatDate(cr.date)}, {cr.startTime} – {cr.endTime}</Text>
+                      <Text style={[s.reqTime, { fontSize: 11, color: "#8b5cf6" }]}>Мой запрос на время</Text>
+                    </View>
+                    <Text style={[s.statusLabel, { color: crColor }]}>{crLabel}</Text>
+                  </View>
+                  {cr.note ? <Text style={s.reqNote}>«{cr.note}»</Text> : null}
+                  {isRejCr && (
+                    <Text style={{ fontSize: 12, color: "#ef4444", marginHorizontal: 12, marginBottom: 10, fontStyle: "italic" }}>
+                      Учитель отклонил ваш запрос на время
+                    </Text>
+                  )}
+                </View>
+              );
+            })}
+          </>
+        )}
       </ScrollView>
     );
   };
@@ -858,6 +994,97 @@ export default function CalendarScreen() {
     </Modal>
   );
 
+  // ── Custom time request modal (student) ────────────────────────────
+  const crStart = `${crStartH}:${crStartM}`;
+  const crEnd   = `${crEndH}:${crEndM}`;
+  const renderCustomReqModal = () => (
+    <Modal visible={showCustomReq} transparent animationType="slide" onRequestClose={() => setShowCustomReq(false)}>
+      <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={() => setShowCustomReq(false)}>
+        <TouchableOpacity style={s.sheet} activeOpacity={1}>
+          <View style={s.handle} />
+          <Text style={s.sheetTitle}>Предложить своё время{"\n"}{formatDate(selectedDate)}</Text>
+
+          {/* Teacher selector */}
+          {crTeachers.length > 1 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {crTeachers.map((t) => {
+                  const active = crTeacherId === t.id;
+                  return (
+                    <TouchableOpacity
+                      key={t.id}
+                      onPress={() => setCrTeacherId(t.id)}
+                      style={[s.filterChip, active && { backgroundColor: "#8b5cf620", borderColor: "#8b5cf6" }]}
+                    >
+                      <Text style={[s.filterChipText, active && { color: "#8b5cf6" }]}>{t.name ?? t.username}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </ScrollView>
+          )}
+          {crTeachers.length === 0 && (
+            <Text style={{ color: colors.mutedForeground, textAlign: "center", marginBottom: 16 }}>
+              Нет подключённых учителей
+            </Text>
+          )}
+          {crTeachers.length === 1 && (
+            <Text style={{ color: colors.mutedForeground, marginBottom: 12, fontSize: 14 }}>
+              Учитель: {crTeachers[0].name ?? crTeachers[0].username}
+            </Text>
+          )}
+
+          {/* Time pickers */}
+          <View style={{ flexDirection: "row", justifyContent: "space-around", marginBottom: 16 }}>
+            <View style={{ alignItems: "center" }}>
+              <Text style={s.timeLabel}>Начало</Text>
+              <View style={s.wheelRow}>
+                <WheelColumn items={HOURS}   value={crStartH} onChange={setCrStartH} fg={colors.foreground} muted={colors.mutedForeground} hlColor={"#8b5cf628"} />
+                <Text style={s.wheelColon}>:</Text>
+                <WheelColumn items={MINUTES} value={crStartM} onChange={setCrStartM} fg={colors.foreground} muted={colors.mutedForeground} hlColor={"#8b5cf628"} />
+              </View>
+            </View>
+            <View style={{ width: 1, backgroundColor: colors.border, marginHorizontal: 4 }} />
+            <View style={{ alignItems: "center" }}>
+              <Text style={s.timeLabel}>Конец</Text>
+              <View style={s.wheelRow}>
+                <WheelColumn items={HOURS}   value={crEndH} onChange={setCrEndH} fg={colors.foreground} muted={colors.mutedForeground} hlColor={"#8b5cf628"} />
+                <Text style={s.wheelColon}>:</Text>
+                <WheelColumn items={MINUTES} value={crEndM} onChange={setCrEndM} fg={colors.foreground} muted={colors.mutedForeground} hlColor={"#8b5cf628"} />
+              </View>
+            </View>
+          </View>
+
+          {crEnd <= crStart && (
+            <Text style={{ color: "#ef4444", fontSize: 13, fontWeight: "600", textAlign: "center", marginBottom: 8 }}>
+              ⚠ Конец раньше начала: {crStart} → {crEnd}
+            </Text>
+          )}
+
+          <Text style={[s.timeLabel, { marginBottom: 8 }]}>Сообщение учителю (необязательно)</Text>
+          <TextInput
+            style={s.noteInput}
+            placeholder="Например: хочу разобрать Present Perfect..."
+            placeholderTextColor={colors.mutedForeground}
+            value={crNote} onChangeText={setCrNote}
+            multiline returnKeyType="done"
+          />
+
+          <TouchableOpacity
+            style={[s.primaryBtn, { backgroundColor: "#8b5cf6" }, (crEnd <= crStart || !crTeacherId || crSaving) && { opacity: 0.4 }]}
+            onPress={handleSendCustomReq}
+            disabled={crEnd <= crStart || !crTeacherId || crSaving}
+          >
+            {crSaving
+              ? <ActivityIndicator color="#fff" />
+              : <Text style={s.primaryBtnText}>Отправить запрос {crStart} – {crEnd}</Text>
+            }
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
+  );
+
   // ── Book-slot modal (student) ───────────────────────────────────────
   const renderBookModal = () => (
     <Modal visible={!!bookSlot} transparent animationType="slide" onRequestClose={() => setBookSlot(null)}>
@@ -883,16 +1110,17 @@ export default function CalendarScreen() {
     </Modal>
   );
 
-  const pendingCount = isTeacherRole ? bookings.length : 0;
+  const pendingCount = isTeacherRole ? bookings.length + customRequests.length : 0;
 
   return (
     <View style={s.container}>
       {renderAddSlotModal()}
+      {renderCustomReqModal()}
       {renderBookModal()}
       <ConfirmModal
         visible={deleteSlotId !== null}
         title="Удалить слот?"
-        message="Все запросы на этот слот также будут отменены."
+        message="Вы действительно хотите удалить этот слот?"
         confirmText="Удалить"
         destructive
         onConfirm={doDeleteSlot}
@@ -908,7 +1136,7 @@ export default function CalendarScreen() {
           <Feather name="calendar" size={14} color={activeTab === "schedule" ? colors.primary : colors.mutedForeground} />
           <Text style={[s.tabText, activeTab === "schedule" && s.tabTextActive]}>Расписание</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[s.tab, activeTab === "requests" && s.tabActive]} onPress={() => { setActiveTab("requests"); loadBookings(); }}>
+        <TouchableOpacity style={[s.tab, activeTab === "requests" && s.tabActive]} onPress={() => { setActiveTab("requests"); loadBookings(); loadCustomRequests(); }}>
           <Feather name={isTeacherRole ? "inbox" : "list"} size={14} color={activeTab === "requests" ? colors.primary : colors.mutedForeground} />
           <Text style={[s.tabText, activeTab === "requests" && s.tabTextActive]}>
             {isTeacherRole ? "Запросы" : "Мои записи"}

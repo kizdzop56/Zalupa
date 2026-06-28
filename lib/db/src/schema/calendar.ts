@@ -18,3 +18,16 @@ export const slotBookingsTable = pgTable("slot_bookings", {
   note: text("note"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [unique("booking_unique").on(t.slotId, t.studentId)]);
+
+// Student-initiated custom time requests (no pre-existing slot required)
+export const customBookingRequestsTable = pgTable("custom_booking_requests", {
+  id: serial("id").primaryKey(),
+  studentId: integer("student_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+  teacherId: integer("teacher_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+  date: text("date").notNull(),
+  startTime: text("start_time").notNull(),
+  endTime: text("end_time").notNull(),
+  note: text("note"),
+  status: text("status").notNull().default("pending"), // "pending" | "confirmed" | "rejected"
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});

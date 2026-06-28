@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import {
-  calendarSlotsTable, slotBookingsTable, usersTable, teacherStudentsTable,
+  calendarSlotsTable, slotBookingsTable, customBookingRequestsTable,
+  usersTable, teacherStudentsTable,
 } from "@workspace/db";
 import { eq, and, inArray, gte } from "drizzle-orm";
 import { requireAuth, getUser, isTeacher } from "../lib/auth";
@@ -294,6 +295,142 @@ router.get("/calendar/bookings", requireAuth, async (req, res) => {
     .where(eq(slotBookingsTable.studentId, caller.userId));
 
   return res.json(bookings);
+});
+
+// ── POST /calendar/custom-requests — student requests custom time ──────
+router.post("/calendar/custom-requests", requireAuth, async (req, res) => {
+  const caller = getUser(req);
+  if (caller.role !== "student") return res.status(403).json({ error: "Только ученик" });
+
+  const { teacherId, date, startTime, endTime, note } = req.body as {
+    teacherId: number; date: string; startTime: string; endTime: string; note?: string;
+  };
+  if (!teacherId || !date || !startTime || !endTime)
+    return res.status(400).json({ error: "Укажите учителя, дату и время" });
+  if (endTime <= startTime)
+    return res.status(400).json({ error: "Конец должен быть позже начала" });
+
+  // Verify student is connected to this teacher
+  const [link] = await db
+    .select()
+    .from(teacherStudentsTable)
+    .where(
+      and(
+        eq(teacherStudentsTable.studentId, caller.userId),
+        eq(teacherStudentsTable.teacherId, teacherId),
+        eq(teacherStudentsTable.status, "accepted"),
+      ),
+    );
+  if (!link) return res.status(403).json({ error: "Нет связи с этим учителем" });
+
+  const [req_] = await db
+    .insert(customBookingRequestsTable)
+    .values({ studentId: caller.userId, teacherId, date, startTime, endTime, note: note ?? null })
+    .returning();
+  return res.status(201).json(req_);
+});
+
+// ── GET /calendar/custom-requests ─────────────────────────────────────
+// Teacher: pending incoming requests / Student: all own requests
+router.get("/calendar/custom-requests", requireAuth, async (req, res) => {
+  const caller = getUser(req);
+
+  if (isTeacher(caller.role)) {
+    const rows = await db
+      .select({
+        id: customBookingRequestsTable.id,
+        studentId: customBookingRequestsTable.studentId,
+        teacherId: customBookingRequestsTable.teacherId,
+        date: customBookingRequestsTable.date,
+        startTime: customBookingRequestsTable.startTime,
+        endTime: customBookingRequestsTable.endTime,
+        note: customBookingRequestsTable.note,
+        status: customBookingRequestsTable.status,
+        createdAt: customBookingRequestsTable.createdAt,
+        studentName: usersTable.name,
+      })
+      .from(customBookingRequestsTable)
+      .leftJoin(usersTable, eq(usersTable.id, customBookingRequestsTable.studentId))
+      .where(
+        and(
+          eq(customBookingRequestsTable.teacherId, caller.userId),
+          eq(customBookingRequestsTable.status, "pending"),
+        ),
+      );
+    return res.json(rows);
+  }
+
+  // Student: all own custom requests
+  const rows = await db
+    .select({
+      id: customBookingRequestsTable.id,
+      studentId: customBookingRequestsTable.studentId,
+      teacherId: customBookingRequestsTable.teacherId,
+      date: customBookingRequestsTable.date,
+      startTime: customBookingRequestsTable.startTime,
+      endTime: customBookingRequestsTable.endTime,
+      note: customBookingRequestsTable.note,
+      status: customBookingRequestsTable.status,
+      createdAt: customBookingRequestsTable.createdAt,
+      teacherName: usersTable.name,
+    })
+    .from(customBookingRequestsTable)
+    .leftJoin(usersTable, eq(usersTable.id, customBookingRequestsTable.teacherId))
+    .where(eq(customBookingRequestsTable.studentId, caller.userId));
+  return res.json(rows);
+});
+
+// ── PATCH /calendar/custom-requests/:id — teacher confirms or rejects ──
+router.patch("/calendar/custom-requests/:id", requireAuth, async (req, res) => {
+  const caller = getUser(req);
+  if (!isTeacher(caller.role)) return res.status(403).json({ error: "Только учитель" });
+
+  const id = Number(req.params.id);
+  const { status } = req.body as { status: "confirmed" | "rejected" };
+  if (!["confirmed", "rejected"].includes(status))
+    return res.status(400).json({ error: "Неверный статус" });
+
+  const [cr] = await db
+    .select()
+    .from(customBookingRequestsTable)
+    .where(and(eq(customBookingRequestsTable.id, id), eq(customBookingRequestsTable.teacherId, caller.userId)));
+  if (!cr) return res.status(404).json({ error: "Запрос не найден" });
+
+  if (status === "confirmed") {
+    // Auto-create the slot if it doesn't exist
+    const existing = await db
+      .select()
+      .from(calendarSlotsTable)
+      .where(
+        and(
+          eq(calendarSlotsTable.teacherId, caller.userId),
+          eq(calendarSlotsTable.date, cr.date),
+          eq(calendarSlotsTable.startTime, cr.startTime),
+        ),
+      );
+    let slotId: number;
+    if (existing.length > 0) {
+      slotId = existing[0].id;
+    } else {
+      const [slot] = await db
+        .insert(calendarSlotsTable)
+        .values({ teacherId: caller.userId, date: cr.date, startTime: cr.startTime, endTime: cr.endTime })
+        .returning();
+      slotId = slot.id;
+    }
+    // Create a confirmed booking on that slot
+    await db
+      .insert(slotBookingsTable)
+      .values({ slotId, studentId: cr.studentId, status: "confirmed", note: cr.note })
+      .onConflictDoNothing();
+  }
+
+  const [updated] = await db
+    .update(customBookingRequestsTable)
+    .set({ status })
+    .where(eq(customBookingRequestsTable.id, id))
+    .returning();
+  return res.json(updated);
 });
 
 export default router;
