@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, TextInput, RefreshControl, Modal, Alert,
+  ActivityIndicator, TextInput, RefreshControl, Modal,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import { useAuth } from "@/contexts/AuthContext";
 import authStorage from "@/utils/authStorage";
+import ConfirmModal from "@/components/ConfirmModal";
 
 // ── API helper ────────────────────────────────────────────────────────
 const BASE_URL = process.env["EXPO_PUBLIC_DOMAIN"]
@@ -75,6 +76,18 @@ function formatDate(dateStr: string | null) {
   if (!dateStr) return "";
   const d = new Date(dateStr + "T00:00:00");
   return `${d.getDate()} ${MONTH_SHORT[d.getMonth()]}`;
+}
+
+// ── Past-slot helper ──────────────────────────────────────────────────
+function isPastSlot(date: string, endTime: string): boolean {
+  const now = new Date();
+  const todayLocal = localDateStr(now);
+  if (date < todayLocal) return true;
+  if (date > todayLocal) return false;
+  const [h, m] = endTime.split(":").map(Number);
+  const slotEnd = new Date();
+  slotEnd.setHours(h, m, 0, 0);
+  return slotEnd <= now;
 }
 
 // Wheel picker data
@@ -181,6 +194,9 @@ export default function CalendarScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<"schedule" | "requests">("schedule");
 
+  // Delete confirm
+  const [deleteSlotId, setDeleteSlotId] = useState<number | null>(null);
+
   // Add-slot modal (teacher)
   const [showAdd, setShowAdd] = useState(false);
   const [addStartH, setAddStartH] = useState("09");
@@ -233,16 +249,13 @@ export default function CalendarScreen() {
     finally { setSaving(false); }
   };
 
-  const handleDeleteSlot = (slotId: number) => {
-    Alert.alert("Удалить слот?", "Все запросы на этот слот также будут отменены.", [
-      { text: "Отмена", style: "cancel" },
-      {
-        text: "Удалить", style: "destructive", onPress: async () => {
-          await apiFetch(`/api/calendar/slots/${slotId}`, { method: "DELETE" }).catch(() => {});
-          await loadSlots(selectedDate);
-        },
-      },
-    ]);
+  const handleDeleteSlot = (slotId: number) => setDeleteSlotId(slotId);
+
+  const doDeleteSlot = async () => {
+    if (!deleteSlotId) return;
+    await apiFetch(`/api/calendar/slots/${deleteSlotId}`, { method: "DELETE" }).catch(() => {});
+    setDeleteSlotId(null);
+    await loadSlots(selectedDate);
   };
 
   const handleBookSlot = async () => {
@@ -313,6 +326,10 @@ export default function CalendarScreen() {
     dc_monA: { color: "#ffffffcc" },
 
     scroll: { padding: 20, paddingBottom: 120 },
+    historyLabel: {
+      fontSize: 12, fontWeight: "700", color: colors.mutedForeground,
+      textAlign: "center", marginVertical: 12, letterSpacing: 1,
+    },
     emptyBox: { alignItems: "center", paddingVertical: 48, gap: 12 },
     emptyEmoji: { fontSize: 42 },
     emptyText: { fontSize: 15, color: colors.mutedForeground, textAlign: "center", lineHeight: 22 },
@@ -413,71 +430,94 @@ export default function CalendarScreen() {
     </ScrollView>
   );
 
+  // ── Reusable slot card (teacher) ────────────────────────────────────
+  const renderTeacherSlotCard = (slot: TeacherSlot, dimmed = false) => {
+    const pending = slot.bookings.filter((b) => b.status === "pending");
+    const confirmed = slot.bookings.find((b) => b.status === "confirmed");
+    const isBusy = !!confirmed;
+    const borderColor = dimmed ? colors.border : (isBusy ? "#ef4444" : "#10b981");
+    const dotColor   = dimmed ? colors.mutedForeground : borderColor;
+    return (
+      <View key={slot.id} style={[s.slotCard, { borderLeftWidth: 4, borderLeftColor: borderColor, opacity: dimmed ? 0.55 : 1 }]}>
+        <View style={s.slotTop}>
+          <View style={[s.slotDot, { backgroundColor: dotColor }]} />
+          <View style={{ flex: 1 }}>
+            <Text style={s.slotTime}>{slot.startTime} – {slot.endTime}</Text>
+            <Text style={s.slotSub}>
+              {dimmed ? "Завершён" : isBusy ? "Занято" : "Свободно"}
+            </Text>
+          </View>
+          {!dimmed && pending.length > 0 && (
+            <View style={s.badge}><Text style={s.badgeText}>{pending.length}</Text></View>
+          )}
+          <TouchableOpacity onPress={() => handleDeleteSlot(slot.id)} style={{ padding: 4 }}>
+            <Feather name="trash-2" size={17} color={colors.mutedForeground} />
+          </TouchableOpacity>
+        </View>
+
+        {confirmed && (
+          <View style={s.bookingRow}>
+            <Feather name="check-circle" size={16} color="#10b981" />
+            <View style={{ flex: 1 }}>
+              <Text style={s.bookingName}>{confirmed.studentName ?? "Ученик"}</Text>
+              {confirmed.note ? <Text style={s.bookingNote}>«{confirmed.note}»</Text> : null}
+            </View>
+            <Text style={[s.statusLabel, { color: "#10b981" }]}>Подтверждено</Text>
+          </View>
+        )}
+
+        {!dimmed && pending.map((b) => (
+          <View key={b.id} style={s.bookingRow}>
+            <Feather name="user" size={16} color={colors.mutedForeground} />
+            <View style={{ flex: 1 }}>
+              <Text style={s.bookingName}>{b.studentName ?? "Ученик"}</Text>
+              {b.note ? <Text style={s.bookingNote}>«{b.note}»</Text> : null}
+            </View>
+            <View style={s.btnRow}>
+              <TouchableOpacity style={s.btnConfirm} onPress={() => handleRespond(b.id, "confirmed")}>
+                <Text style={s.btnText}>✓</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.btnReject} onPress={() => handleRespond(b.id, "rejected")}>
+                <Text style={s.btnText}>✗</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ))}
+      </View>
+    );
+  };
+
   // ── Teacher: schedule tab ───────────────────────────────────────────
   const renderTeacherSchedule = () => {
     const daySlots = slots as TeacherSlot[];
+    const active = daySlots.filter((s) => !isPastSlot(s.date, s.endTime));
+    const past   = daySlots.filter((s) =>  isPastSlot(s.date, s.endTime));
     return (
       <ScrollView
         contentContainerStyle={s.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
       >
-        {daySlots.length === 0 && (
+        {active.length === 0 && past.length === 0 && (
           <View style={s.emptyBox}>
             <Text style={s.emptyEmoji}>📅</Text>
             <Text style={s.emptyText}>Нет слотов на {formatDate(selectedDate)}{"\n"}Добавьте время для занятий</Text>
           </View>
         )}
-        {daySlots.map((slot) => {
-          const pending = slot.bookings.filter((b) => b.status === "pending");
-          const confirmed = slot.bookings.find((b) => b.status === "confirmed");
-          const isBusy = !!confirmed;
-          return (
-            <View key={slot.id} style={[s.slotCard, { borderLeftWidth: 4, borderLeftColor: isBusy ? "#ef4444" : "#10b981" }]}>
-              <View style={s.slotTop}>
-                <View style={[s.slotDot, { backgroundColor: isBusy ? "#ef4444" : "#10b981" }]} />
-                <View style={{ flex: 1 }}>
-                  <Text style={s.slotTime}>{slot.startTime} – {slot.endTime}</Text>
-                  <Text style={s.slotSub}>{isBusy ? "Занято" : "Свободно"}</Text>
-                </View>
-                {pending.length > 0 && (
-                  <View style={s.badge}><Text style={s.badgeText}>{pending.length}</Text></View>
-                )}
-                <TouchableOpacity onPress={() => handleDeleteSlot(slot.id)} style={{ padding: 4 }}>
-                  <Feather name="trash-2" size={17} color={colors.mutedForeground} />
-                </TouchableOpacity>
-              </View>
+        {active.length === 0 && past.length > 0 && (
+          <View style={s.emptyBox}>
+            <Text style={s.emptyEmoji}>✅</Text>
+            <Text style={s.emptyText}>Все занятия сегодня завершены</Text>
+          </View>
+        )}
 
-              {confirmed && (
-                <View style={s.bookingRow}>
-                  <Feather name="check-circle" size={16} color="#10b981" />
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.bookingName}>{confirmed.studentName ?? "Ученик"}</Text>
-                    {confirmed.note ? <Text style={s.bookingNote}>«{confirmed.note}»</Text> : null}
-                  </View>
-                  <Text style={[s.statusLabel, { color: "#10b981" }]}>Подтверждено</Text>
-                </View>
-              )}
+        {active.map((slot) => renderTeacherSlotCard(slot, false))}
 
-              {pending.map((b) => (
-                <View key={b.id} style={s.bookingRow}>
-                  <Feather name="user" size={16} color={colors.mutedForeground} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.bookingName}>{b.studentName ?? "Ученик"}</Text>
-                    {b.note ? <Text style={s.bookingNote}>«{b.note}»</Text> : null}
-                  </View>
-                  <View style={s.btnRow}>
-                    <TouchableOpacity style={s.btnConfirm} onPress={() => handleRespond(b.id, "confirmed")}>
-                      <Text style={s.btnText}>✓</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={s.btnReject} onPress={() => handleRespond(b.id, "rejected")}>
-                      <Text style={s.btnText}>✗</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))}
-            </View>
-          );
-        })}
+        {past.length > 0 && (
+          <>
+            <Text style={s.historyLabel}>— История —</Text>
+            {past.map((slot) => renderTeacherSlotCard(slot, true))}
+          </>
+        )}
 
         <TouchableOpacity style={s.addBtn} onPress={() => setShowAdd(true)}>
           <Feather name="plus-circle" size={18} color={colors.primary} />
@@ -527,18 +567,27 @@ export default function CalendarScreen() {
   // ── Student: schedule tab ───────────────────────────────────────────
   const renderStudentSchedule = () => {
     const daySlots = slots as StudentSlot[];
+    const active = daySlots.filter((sl) => !isPastSlot(sl.date, sl.endTime));
+    const past   = daySlots.filter((sl) =>  isPastSlot(sl.date, sl.endTime));
     return (
       <ScrollView
         contentContainerStyle={s.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
       >
-        {daySlots.length === 0 && (
+        {active.length === 0 && past.length === 0 && (
           <View style={s.emptyBox}>
             <Text style={s.emptyEmoji}>📅</Text>
             <Text style={s.emptyText}>Нет доступных слотов на {formatDate(selectedDate)}</Text>
           </View>
         )}
-        {daySlots.map((slot) => {
+        {active.length === 0 && past.length > 0 && (
+          <View style={s.emptyBox}>
+            <Text style={s.emptyEmoji}>✅</Text>
+            <Text style={s.emptyText}>Все занятия сегодня завершены</Text>
+          </View>
+        )}
+
+        {active.map((slot) => {
           const meta = STATUS_CFG[slot.status];
           return (
             <View key={slot.id} style={[s.slotCard, { borderLeftWidth: 4, borderLeftColor: meta.color }]}>
@@ -571,6 +620,27 @@ export default function CalendarScreen() {
             </View>
           );
         })}
+
+        {past.length > 0 && (
+          <>
+            <Text style={s.historyLabel}>— История —</Text>
+            {past.map((slot) => {
+              const meta = STATUS_CFG[slot.status];
+              return (
+                <View key={slot.id} style={[s.slotCard, { borderLeftWidth: 4, borderLeftColor: colors.border, opacity: 0.5 }]}>
+                  <View style={s.slotTop}>
+                    <View style={[s.slotDot, { backgroundColor: colors.mutedForeground }]} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.slotTime}>{slot.startTime} – {slot.endTime}</Text>
+                      {slot.teacherName && <Text style={s.slotSub}>{slot.teacherName}</Text>}
+                    </View>
+                    <Text style={[s.statusLabel, { color: meta.color }]}>{meta.label}</Text>
+                  </View>
+                </View>
+              );
+            })}
+          </>
+        )}
       </ScrollView>
     );
   };
@@ -716,6 +786,15 @@ export default function CalendarScreen() {
     <View style={s.container}>
       {renderAddSlotModal()}
       {renderBookModal()}
+      <ConfirmModal
+        visible={deleteSlotId !== null}
+        title="Удалить слот?"
+        message="Все запросы на этот слот также будут отменены."
+        confirmText="Удалить"
+        destructive
+        onConfirm={doDeleteSlot}
+        onCancel={() => setDeleteSlotId(null)}
+      />
 
       <View style={s.header}>
         <Text style={s.headerTitle}>Календарь</Text>
