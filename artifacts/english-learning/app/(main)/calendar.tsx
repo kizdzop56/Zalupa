@@ -301,7 +301,8 @@ export default function CalendarScreen() {
       });
       setShowAdd(false);
       await loadSlots(selectedDate);
-      scheduleScrollRef.current?.scrollTo({ y: 0, animated: true });
+      // Defer scroll until after React re-renders with the new slot
+      setTimeout(() => scheduleScrollRef.current?.scrollTo({ y: 0, animated: false }), 50);
     } catch (e: any) { Alert.alert("Ошибка", e.message); }
     finally { setSaving(false); }
   };
@@ -420,7 +421,7 @@ export default function CalendarScreen() {
     dc_mon: { fontSize: 8, color: colors.mutedForeground, lineHeight: 11 },
     dc_monA: { color: "#ffffffcc" },
 
-    scroll: { padding: 20, paddingBottom: 120 },
+    scroll: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 120 },
     historyLabel: {
       fontSize: 12, fontWeight: "700", color: colors.mutedForeground,
       textAlign: "center", marginVertical: 12, letterSpacing: 1,
