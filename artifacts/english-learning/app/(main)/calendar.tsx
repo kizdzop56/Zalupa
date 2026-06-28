@@ -205,6 +205,7 @@ export default function CalendarScreen() {
 
   // Delete confirm
   const [deleteSlotId, setDeleteSlotId] = useState<number | null>(null);
+  const scheduleScrollRef = useRef<import("react-native").ScrollView>(null);
 
   // Bookings filter (student)
   const [bookingFilter, setBookingFilter] = useState<"all" | "pending" | "confirmed" | "rejected">("all");
@@ -300,6 +301,7 @@ export default function CalendarScreen() {
       });
       setShowAdd(false);
       await loadSlots(selectedDate);
+      scheduleScrollRef.current?.scrollTo({ y: 0, animated: true });
     } catch (e: any) { Alert.alert("Ошибка", e.message); }
     finally { setSaving(false); }
   };
@@ -372,6 +374,7 @@ export default function CalendarScreen() {
       });
       setShowCustomReq(false);
       await loadCustomRequests();
+      setActiveTab("requests");
     } catch (e: any) {
       setCrError(e?.message ?? "Не удалось отправить запрос. Убедитесь, что вы подключены к учителю.");
     } finally { setCrSaving(false); }
@@ -595,6 +598,7 @@ export default function CalendarScreen() {
     const past   = daySlots.filter((s) =>  isPastSlot(s.date, s.endTime));
     return (
       <ScrollView
+        ref={scheduleScrollRef}
         contentContainerStyle={s.scroll}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
       >
